@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Freshservice 작업 시나리오",
+  "version": "0.4.3",
+  "description": "Freshservice 티켓 화면에서 작업 시나리오를 생성하고 완료 상태를 체크합니다.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://*.freshservice.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.freshservice.com/*"],
+      "js": ["content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Freshservice 작업 시나리오 설정",
+    "default_popup": "settings.html"
+  },
+  "options_page": "settings.html"
+}
