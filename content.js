@@ -18,8 +18,11 @@
   };
 
   const BULK_CONFIRM_THRESHOLD = 5;
+  const DRAG_SELECT_THRESHOLD_PX = 6;
 
   let contextLoadPromise = null;
+  let dragSelect = null;
+  let suppressClickUntil = 0;
   let toastTimer = null;
 
   function escapeHtml(value) {
@@ -316,6 +319,52 @@
     return state.tasks.filter(task => !task.agent_id);
   }
 
+  function taskRowFromTarget(target) {
+    return target?.closest?.('.fsx-inline-row') || null;
+  }
+
+  function taskIdFromRow(row) {
+    const taskId = Number(row?.dataset?.fsxTaskId || 0);
+    return Number.isInteger(taskId) && taskId > 0 ? taskId : null;
+  }
+
+  function isDragSelectIgnoredTarget(target) {
+    return !!target?.closest?.(
+      '.fsx-inline-controls,.fsx-bulk-bar,a,button,input,select,textarea,[contenteditable="true"]'
+    );
+  }
+
+  function setTaskSelected(taskId, selected) {
+    if (!taskId) return false;
+    const had = state.selectedTaskIds.has(taskId);
+    if (selected) state.selectedTaskIds.add(taskId);
+    else state.selectedTaskIds.delete(taskId);
+    return had !== selected;
+  }
+
+  function applyDragSelection(row) {
+    if (!dragSelect?.active || !row) return;
+    const taskId = taskIdFromRow(row);
+    if (!taskId || dragSelect.touched.has(taskId)) return;
+    dragSelect.touched.add(taskId);
+    if (setTaskSelected(taskId, dragSelect.shouldSelect)) {
+      dragSelect.changedCount += 1;
+      injectInlineControls();
+    }
+  }
+
+  function finishDragSelection() {
+    if (!dragSelect) return;
+    const changed = dragSelect.active ? dragSelect.changedCount : 0;
+    const label = dragSelect.shouldSelect ? '선택' : '선택 해제';
+    document.documentElement.classList.remove('fsx-drag-selecting');
+    dragSelect = null;
+    if (changed) {
+      suppressClickUntil = Date.now() + 350;
+      showToast(`${changed}개 작업 ${label} 완료`);
+    }
+  }
+
   function removeBulkBar() {
     document.querySelector('.fsx-bulk-bar')?.remove();
   }
@@ -420,6 +469,8 @@
       const selected = state.selectedTaskIds.has(Number(task.id));
       row.classList.add('fsx-inline-row');
       row.classList.toggle('fsx-inline-selected', selected);
+      row.dataset.fsxTaskId = String(task.id);
+      row.title = row.title || '드래그하면 여러 작업을 선택/해제할 수 있습니다';
       let controls = row.querySelector(':scope > .fsx-inline-controls');
       if (!controls) {
         controls = document.createElement('div');
@@ -598,7 +649,57 @@
     }
   }
 
+  function handlePointerDown(event) {
+    if (state.bulkBusy || event.button !== 0 || isDragSelectIgnoredTarget(event.target)) return;
+    const row = taskRowFromTarget(event.target);
+    const taskId = taskIdFromRow(row);
+    if (!taskId) return;
+
+    dragSelect = {
+      active: false,
+      pointerId: event.pointerId,
+      shouldSelect: !state.selectedTaskIds.has(taskId),
+      startX: event.clientX,
+      startY: event.clientY,
+      startRow: row,
+      touched: new Set(),
+      changedCount: 0,
+    };
+    try {
+      row.setPointerCapture?.(event.pointerId);
+    } catch (_) {
+      // Pointer capture is best-effort; document listeners still handle the drag.
+    }
+  }
+
+  function handlePointerMove(event) {
+    if (!dragSelect || dragSelect.pointerId !== event.pointerId || state.bulkBusy) return;
+
+    const distance = Math.hypot(event.clientX - dragSelect.startX, event.clientY - dragSelect.startY);
+    if (!dragSelect.active) {
+      if (distance < DRAG_SELECT_THRESHOLD_PX) return;
+      dragSelect.active = true;
+      document.documentElement.classList.add('fsx-drag-selecting');
+      applyDragSelection(dragSelect.startRow);
+    }
+
+    event.preventDefault();
+    const row = taskRowFromTarget(document.elementFromPoint(event.clientX, event.clientY));
+    applyDragSelection(row);
+  }
+
+  function handlePointerEnd(event) {
+    if (!dragSelect || dragSelect.pointerId !== event.pointerId) return;
+    finishDragSelection();
+  }
+
   function handleClick(event) {
+    if (Date.now() < suppressClickUntil) {
+      event.stopPropagation();
+      event.preventDefault();
+      return;
+    }
+
     const bulkButton = event.target.closest('.fsx-bulk-bar [data-action]');
     if (bulkButton) {
       event.stopPropagation();
@@ -638,6 +739,10 @@
 
   document.addEventListener('change', handleChange, true);
   document.addEventListener('click', handleClick, true);
+  document.addEventListener('pointerdown', handlePointerDown, true);
+  document.addEventListener('pointermove', handlePointerMove, true);
+  document.addEventListener('pointerup', handlePointerEnd, true);
+  document.addEventListener('pointercancel', handlePointerEnd, true);
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
     if (!changes.fsDomain && !changes.fsApiKey) return;

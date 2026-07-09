@@ -11,6 +11,7 @@ Note: the current extension UI includes Korean labels because it was originally 
 - Detects Freshservice ticket task rows on `/a/tickets/{ticketId}` pages.
 - Adds inline controls for task selection, completion status, and agent assignment.
 - Provides a sticky bulk action bar for multi-task updates.
+- Supports drag selection across task rows for faster multi-task selection.
 - Supports quick selection presets such as open tasks only and unassigned tasks only.
 - Stores Freshservice settings locally in the browser.
 - Calls the Freshservice API directly from the extension. No separate server is required.
@@ -61,6 +62,7 @@ Your API key is not sent to any third-party server. It is stored only in this br
 When ticket tasks are visible, a bulk action bar appears above the task list.
 
 1. Select target tasks using each row's selection checkbox or the bulk action bar.
+   - Drag across task rows to select or deselect multiple tasks quickly.
    - Use the open-only preset to select only incomplete tasks.
    - Use the unassigned preset to select tasks without an assigned agent.
    - Selected rows are highlighted and marked with a selected label.

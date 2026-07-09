@@ -1,5 +1,20 @@
 .fsx-inline-row {
+  cursor: default;
   position: relative !important;
+}
+
+.fsx-inline-row:not(:has(.fsx-inline-controls:hover)) {
+  user-select: none;
+}
+
+.fsx-drag-selecting,
+.fsx-drag-selecting * {
+  cursor: crosshair !important;
+  user-select: none !important;
+}
+
+.fsx-drag-selecting .fsx-inline-row {
+  transition: border-color .08s ease, box-shadow .08s ease;
 }
 
 .fsx-inline-row.fsx-inline-selected {
