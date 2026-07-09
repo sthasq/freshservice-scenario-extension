@@ -1,67 +1,100 @@
-# Freshservice 작업 시나리오 확장프로그램
+# Freshservice Task Scenario Extension
 
-Freshservice 티켓 상세 화면에서 작업 시나리오를 생성하고 하위 작업 완료 상태를 체크하는 독립형 브라우저 확장프로그램입니다. Chrome과 Edge(Chromium 기반)에서 동일하게 동작합니다.
+A standalone Chrome/Edge extension for managing Freshservice ticket tasks directly from the ticket detail page.
 
-## 설치
+It helps service desk teams create repeatable task workflows, mark tasks as complete or open, assign agents, and bulk-update multiple ticket tasks without leaving Freshservice.
 
-**Chrome**
+Note: the current extension UI includes Korean labels because it was originally built for an internal Korean service desk workflow. This README describes what each control does in English.
 
-1. `chrome://extensions`를 엽니다.
-2. 개발자 모드를 켭니다.
-3. `압축해제된 확장 프로그램을 로드`를 누릅니다.
-4. 이 폴더를 선택합니다.
+## Features
 
-**Edge**
+- Detects Freshservice ticket task rows on `/a/tickets/{ticketId}` pages.
+- Adds inline controls for task selection, completion status, and agent assignment.
+- Provides a sticky bulk action bar for multi-task updates.
+- Supports quick selection presets such as open tasks only and unassigned tasks only.
+- Stores Freshservice settings locally in the browser.
+- Calls the Freshservice API directly from the extension. No separate server is required.
 
-1. `edge://extensions`를 엽니다.
-2. 개발자 모드를 켭니다.
-3. `압축 풀린 확장을 로드합니다`를 누릅니다.
-4. 이 폴더를 선택합니다.
+## Installation
+
+### Chrome
+
+1. Open `chrome://extensions`.
+2. Enable Developer mode.
+3. Click `Load unpacked`.
+4. Select this folder.
+
+### Edge
+
+1. Open `edge://extensions`.
+2. Enable Developer mode.
+3. Click `Load unpacked`.
+4. Select this folder.
 
 ```text
 freshservice-scenario-extension
 ```
 
-## 설정
+## Configuration
 
-확장 아이콘을 눌러 설정 팝업을 엽니다. 팝업 상단에서 현재 설치된 확장 버전을 확인할 수 있습니다.
+Click the extension icon to open the settings popup. The installed extension version is shown at the top of the popup.
 
-1. `FS_DOMAIN`, `FS_API_KEY` 값을 입력합니다.
-   - `FS_DOMAIN`: 예) `acme` 또는 `acme.freshservice.com`
-   - `FS_API_KEY`: Freshservice **개인 API 키**
-2. `저장`을 누르면 값이 저장된 뒤 자동으로 `연결 확인`이 실행됩니다.
-3. 저장/확인이 진행되는 동안에는 중복 클릭을 막기 위해 버튼이 잠시 비활성화됩니다.
-4. 상태 메시지는 진행 중(회색) / 성공(초록) / 실패(빨강)로 구분되어 표시됩니다.
+1. Enter `FS_DOMAIN` and `FS_API_KEY`.
+   - `FS_DOMAIN`: for example, `acme` or `acme.freshservice.com`
+   - `FS_API_KEY`: your personal Freshservice API key
+2. Click the save button.
+3. After saving, the extension automatically runs a connection test.
+4. Status messages are shown as loading, success, or error states.
 
-API 키는 서버로 전송되지 않고 이 브라우저의 **로컬 저장소**에만 저장됩니다. Freshservice 작업 변경 이력은 이 API 키 사용자(개인 계정) 기준으로 기록됩니다.
+Your API key is not sent to any third-party server. It is stored only in this browser's local extension storage. Freshservice task changes are recorded by Freshservice under the API key owner's account.
 
-## 사용
+## Usage
 
-1. Freshservice 티켓 상세 화면(`/a/tickets/{ticketId}`)을 엽니다.
-2. `작업` 탭을 엽니다.
-3. 각 작업 row 오른쪽에 추가된 `완료` 체크박스로 완료/대기 상태를 변경합니다.
-4. 각 작업 row 오른쪽의 에이전트 드롭다운으로 담당 에이전트를 할당합니다.
-5. 처리 결과는 화면 우측 상단 토스트 알림으로 안내됩니다. 실패(에러) 메시지는 성공 메시지보다 더 오래 표시되어 놓치지 않고 확인할 수 있습니다.
+1. Open a Freshservice ticket detail page, such as `/a/tickets/{ticketId}`.
+2. Open the ticket's task tab or task section.
+3. Use the inline status checkbox to switch a task between completed and open.
+4. Use the inline agent dropdown to assign a task to an agent.
+5. Result messages appear as toast notifications in the upper-right area of the page.
 
-### 여러 작업 한 번에 변경 (일괄 처리)
+### Bulk Updates
 
-작업 탭을 열면 작업 목록 맨 위에 일괄 액션 바가 항상 표시됩니다. 선택이 없을 때는 `작업 n개 · 완료 n` 현황이 보입니다.
+When ticket tasks are visible, a bulk action bar appears above the task list.
 
-1. 각 작업 row의 `선택` 체크박스 또는 액션 바의 `전체 선택`으로 대상을 고릅니다.
-   - `대기만 선택`, `미할당 선택`으로 처리 대상만 빠르게 좁힐 수 있습니다.
-   - 선택된 row는 파란색 강조와 `선택됨` 라벨로 표시됩니다.
-2. 액션 바에서 다음을 실행할 수 있습니다.
-   - `완료 처리` / `대기 전환`: 선택한 작업의 상태를 한 번에 변경합니다.
-   - `에이전트 선택` 후 `담당자 적용`: 선택한 작업 전체를 같은 에이전트에게 할당합니다.
-   - `미할당만 할당 (n)`: 선택 여부와 관계없이 담당 에이전트가 비어 있는 작업 전체에 지정한 에이전트를 할당합니다.
-   - `전체 선택` / `전체 해제` / `선택 비우기`: 현재 티켓의 모든 작업을 선택하거나 선택을 비웁니다.
-3. 5건을 초과해 변경할 때는 확인 창이 한 번 표시됩니다. (한 번에 최대 50건)
-4. 일부 작업만 실패하면 `n건 성공, n건 실패` 토스트가 표시되고, 실패한 작업만 선택된 상태로 남아 바로 재시도할 수 있습니다.
+1. Select target tasks using each row's selection checkbox or the bulk action bar.
+   - Use the open-only preset to select only incomplete tasks.
+   - Use the unassigned preset to select tasks without an assigned agent.
+   - Selected rows are highlighted and marked with a selected label.
+2. Run one of the bulk actions.
+   - Mark selected tasks as completed.
+   - Change selected tasks back to open.
+   - Choose an agent, then apply that agent to the selected tasks.
+   - Apply the selected agent only to currently unassigned tasks, regardless of the current selection.
+   - Use the select-all and clear-selection controls to manage the current selection.
+3. If more than five tasks are changed at once, a confirmation dialog is shown.
+4. If some tasks fail, failed tasks remain selected so you can retry them.
 
-작업 변경 이력은 Freshservice에 API 키 사용자 기준으로 기록됩니다.
+Bulk updates are limited to 50 tasks per request.
 
-## 보안 메모
+## Security Notes
 
-- 별도 서버 없이 확장프로그램이 Freshservice API를 직접 호출합니다.
-- API 키는 브라우저 로컬 저장소에 저장됩니다.
-- 공유 PC에서는 사용 후 확장 설정에서 API 키를 삭제하세요.
+- The extension talks directly to the Freshservice API.
+- No backend server is used.
+- The API key is stored in local browser extension storage.
+- On shared computers, remove the API key from the extension settings after use.
+
+## Development
+
+This extension uses Manifest V3 and plain JavaScript, HTML, and CSS.
+
+Useful checks:
+
+```bash
+node --check content.js
+node --check background.js
+node --check settings.js
+node -e "JSON.parse(require('fs').readFileSync('manifest.json', 'utf8')); console.log('manifest ok')"
+```
+
+## License
+
+MIT
