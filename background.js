@@ -5,6 +5,7 @@ const STORAGE_DEFAULTS = {
 
 const TASK_STATUS = {
   OPEN: 1,
+  IN_PROGRESS: 2,
   COMPLETED: 3,
 };
 
@@ -12,6 +13,7 @@ const AGENT_CACHE_TTL_MS = 10 * 60 * 1000;
 const BULK_UPDATE_MAX_TASKS = 50;
 const BULK_UPDATE_DELAY_MS = 150;
 let agentCache = { domain: '', at: 0, agents: [] };
+let currentAgentCache = { domain: '', apiKey: '', at: 0, agent: null };
 
 const TASK_SCENARIO_TEMPLATES = [
   {
@@ -165,7 +167,7 @@ function normalizeTaskTitle(title) {
 function statusLabel(status) {
   const numeric = Number(status);
   if (numeric === TASK_STATUS.COMPLETED) return '완료';
-  if (numeric === 2) return '진행 중';
+  if (numeric === TASK_STATUS.IN_PROGRESS) return '진행 중';
   if (numeric === TASK_STATUS.OPEN) return '대기';
   return status ? String(status) : '알 수 없음';
 }
@@ -406,6 +408,23 @@ async function fetchAgents(settings, { force = false } = {}) {
   return agentCache.agents;
 }
 
+async function fetchCurrentAgent(settings, { force = false } = {}) {
+  if (
+    !force &&
+    currentAgentCache.domain === settings.fsDomain &&
+    currentAgentCache.apiKey === settings.fsApiKey &&
+    currentAgentCache.agent &&
+    Date.now() - currentAgentCache.at < AGENT_CACHE_TTL_MS
+  ) {
+    return currentAgentCache.agent;
+  }
+
+  const data = await freshserviceFetch(settings, '/agents/me');
+  const agent = normalizeAgent(data?.agent || data);
+  currentAgentCache = { domain: settings.fsDomain, apiKey: settings.fsApiKey, at: Date.now(), agent };
+  return agent;
+}
+
 async function createTicketTask(settings, ticketId, payload) {
   try {
     const data = await freshserviceFetch(settings, `/tickets/${ticketId}/tasks`, {
@@ -457,15 +476,17 @@ async function updateTicketTaskWithCandidates(settings, ticketId, taskId, candid
 
 async function buildTasksPayload(ticketId) {
   const settings = await getSettings({ requireConfigured: true });
-  const [ticket, tasks, agents] = await Promise.all([
+  const [ticket, tasks, agents, currentAgent] = await Promise.all([
     fetchTicket(settings, ticketId),
     fetchTicketTasks(settings, ticketId),
     fetchAgents(settings).catch(() => []),
+    fetchCurrentAgent(settings).catch(() => null),
   ]);
   const suggested = inferTaskScenario(ticket);
 
   return {
     agents,
+    me: currentAgent?.id || null,
     settings: safeSettings(settings),
     ticket: normalizeTicket(ticket),
     ticket_url: ticketWebUrl(settings, ticketId),
@@ -529,9 +550,20 @@ function assertValidUpdates(updates) {
 
 function buildUpdateCandidates(existing, updates) {
   const candidates = [];
+  const hasStatus = updates.status != null;
+  const hasAgent = updates.agentId != null;
+  const status = hasStatus ? Number(updates.status) : null;
+  const agentId = hasAgent ? Number(updates.agentId) : null;
 
-  if (updates.status != null) {
-    const status = Number(updates.status);
+  if (hasStatus && hasAgent) {
+    candidates.push(
+      { status, agent_id: agentId },
+      { title: existing.title, status, agent_id: agentId },
+      { title: existing.title, description: existing.description || '', status, agent_id: agentId }
+    );
+  }
+
+  if (hasStatus) {
     candidates.push(
       { status },
       { title: existing.title, status },
@@ -539,8 +571,7 @@ function buildUpdateCandidates(existing, updates) {
     );
   }
 
-  if (updates.agentId != null) {
-    const agentId = Number(updates.agentId);
+  if (hasAgent) {
     candidates.push(
       { agent_id: agentId },
       { title: existing.title, agent_id: agentId },

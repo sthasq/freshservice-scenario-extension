@@ -1,5 +1,5 @@
 .fsx-inline-row {
-  cursor: default;
+  cursor: pointer;
   position: relative !important;
 }
 
@@ -32,6 +32,20 @@
   z-index: 1;
 }
 
+.fsx-inline-row.fsx-inline-completed::before {
+  background: rgba(47, 133, 90, .08);
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+}
+
+.fsx-inline-row.fsx-inline-completed:not(.fsx-inline-selected) {
+  box-shadow: inset 4px 0 0 #2f855a, 0 0 0 1px rgba(47, 133, 90, .2) !important;
+}
+
 .fsx-inline-controls {
   align-items: center;
   background: #fff;
@@ -56,46 +70,35 @@
   box-shadow: 0 8px 24px rgba(51, 112, 255, .2);
 }
 
-.fsx-inline-check {
-  align-items: center;
+.fsx-inline-status {
+  background: #fff;
+  border: 1px solid #ccd5df;
+  border-radius: 6px;
   color: #3d4752;
-  cursor: pointer;
-  display: inline-flex;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
   font-size: 13px;
   font-weight: 800;
-  gap: 6px;
-  margin: 0;
-  white-space: nowrap;
+  height: 30px;
+  min-width: 88px;
+  outline: none;
+  padding: 0 26px 0 10px;
 }
 
-.fsx-inline-check input {
-  accent-color: #2f855a;
-  height: 18px;
-  margin: 0;
-  width: 18px;
+.fsx-inline-status-2 {
+  background: #fff7e6;
+  border-color: #f0c96b;
+  color: #8a5b00;
 }
 
-.fsx-inline-pick {
-  background: #eef4ff;
-  border: 1px solid #c7d8ff;
-  border-radius: 6px;
-  color: #1f4fb8;
-  font-size: 13.5px;
-  min-height: 30px;
-  min-width: 76px;
-  padding: 4px 10px;
-}
-
-.fsx-inline-pick-selected {
-  background: #3370ff;
-  border-color: #3370ff;
+.fsx-inline-status-3 {
+  background: #2f855a;
+  border-color: #2f855a;
   color: #fff;
 }
 
-.fsx-inline-pick input {
-  accent-color: #3370ff;
-  height: 20px;
-  width: 20px;
+.fsx-inline-status:focus {
+  border-color: #c9362c;
+  box-shadow: 0 0 0 3px rgba(201, 54, 44, .12);
 }
 
 .fsx-inline-agent {
@@ -134,29 +137,41 @@
   background: rgba(106, 164, 255, .1);
 }
 
+.fsx-dark-mode .fsx-inline-row.fsx-inline-completed::before {
+  background: rgba(72, 187, 130, .12);
+}
+
+.fsx-dark-mode .fsx-inline-row.fsx-inline-completed:not(.fsx-inline-selected) {
+  box-shadow: inset 4px 0 0 #48bb82, 0 0 0 1px rgba(72, 187, 130, .28) !important;
+}
+
 .fsx-dark-mode .fsx-inline-controls-selected {
   border-color: #6aa4ff;
   box-shadow: 0 10px 26px rgba(106, 164, 255, .18);
 }
 
-.fsx-dark-mode .fsx-inline-check {
+.fsx-dark-mode .fsx-inline-status {
+  background: #0b1118;
+  border-color: #344255;
   color: #e8eef6;
+  color-scheme: dark;
 }
 
-.fsx-dark-mode .fsx-inline-check input {
-  accent-color: #6aa4ff;
+.fsx-dark-mode .fsx-inline-status-2 {
+  background: #2a2108;
+  border-color: #8a6d1f;
+  color: #f0c96b;
 }
 
-.fsx-dark-mode .fsx-inline-pick {
-  background: #10243d;
-  border-color: #2d5f9f;
-  color: #dbeafe;
+.fsx-dark-mode .fsx-inline-status-3 {
+  background: #48bb82;
+  border-color: #48bb82;
+  color: #06170f;
 }
 
-.fsx-dark-mode .fsx-inline-pick-selected {
-  background: #6aa4ff;
+.fsx-dark-mode .fsx-inline-status:focus {
   border-color: #6aa4ff;
-  color: #06111f;
+  box-shadow: 0 0 0 3px rgba(106, 164, 255, .18);
 }
 
 .fsx-dark-mode .fsx-inline-agent {
@@ -175,7 +190,7 @@
   color: #a8b5c4;
 }
 
-.fsx-inline-check input:disabled,
+.fsx-inline-status:disabled,
 .fsx-inline-agent:disabled {
   cursor: not-allowed;
   opacity: .55;

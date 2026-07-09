@@ -1,13 +1,21 @@
 (function () {
   const TASK_STATUS = {
     OPEN: 1,
+    IN_PROGRESS: 2,
     COMPLETED: 3,
+  };
+
+  const TASK_STATUS_LABELS = {
+    [TASK_STATUS.OPEN]: '대기',
+    [TASK_STATUS.IN_PROGRESS]: '진행중',
+    [TASK_STATUS.COMPLETED]: '완료',
   };
 
   const state = {
     agents: [],
     bulkBusy: false,
     busyTaskIds: new Set(),
+    currentAgentId: null,
     error: '',
     loadedTicketId: null,
     message: '',
@@ -19,11 +27,15 @@
 
   const BULK_CONFIRM_THRESHOLD = 5;
   const DRAG_SELECT_THRESHOLD_PX = 6;
+  const DRAG_SAMPLE_STEP_PX = 12;
 
   let contextLoadPromise = null;
+  let contextInvalidated = false;
   let dragSelect = null;
   let suppressClickUntil = 0;
   let toastTimer = null;
+  let watchIntervalId = null;
+  let pageObserver = null;
 
   function escapeHtml(value) {
     return String(value || '')
@@ -44,15 +56,52 @@
       .trim();
   }
 
+  const CONTEXT_INVALIDATED_MESSAGE = '확장 프로그램이 업데이트되었습니다. 페이지를 새로고침한 후 다시 이용해주세요.';
+
+  function isContextInvalidatedError(error) {
+    return /extension context invalidated/i.test(String(error?.message || error || ''));
+  }
+
+  function handleContextInvalidated() {
+    if (contextInvalidated) return;
+    contextInvalidated = true;
+    if (watchIntervalId) {
+      clearInterval(watchIntervalId);
+      watchIntervalId = null;
+    }
+    if (pageObserver) {
+      pageObserver.disconnect();
+      pageObserver = null;
+    }
+    showToast(CONTEXT_INVALIDATED_MESSAGE, 'error');
+  }
+
   function sendMessage(type, payload = {}) {
+    if (contextInvalidated) {
+      return Promise.resolve({ ok: false, message: CONTEXT_INVALIDATED_MESSAGE, status: 0 });
+    }
     return new Promise(resolve => {
-      chrome.runtime.sendMessage({ type, ...payload }, response => {
-        if (chrome.runtime.lastError) {
-          resolve({ ok: false, message: chrome.runtime.lastError.message, status: 0 });
+      try {
+        chrome.runtime.sendMessage({ type, ...payload }, response => {
+          if (chrome.runtime.lastError) {
+            if (isContextInvalidatedError(chrome.runtime.lastError)) {
+              handleContextInvalidated();
+              resolve({ ok: false, message: CONTEXT_INVALIDATED_MESSAGE, status: 0 });
+              return;
+            }
+            resolve({ ok: false, message: chrome.runtime.lastError.message, status: 0 });
+            return;
+          }
+          resolve(response || { ok: false, message: '확장 응답이 없습니다.', status: 0 });
+        });
+      } catch (error) {
+        if (isContextInvalidatedError(error)) {
+          handleContextInvalidated();
+          resolve({ ok: false, message: CONTEXT_INVALIDATED_MESSAGE, status: 0 });
           return;
         }
-        resolve(response || { ok: false, message: '확장 응답이 없습니다.', status: 0 });
-      });
+        resolve({ ok: false, message: error?.message || '확장과 통신할 수 없습니다.', status: 0 });
+      }
     });
   }
 
@@ -127,6 +176,7 @@
 
   function applyContext(data) {
     state.agents = data?.agents || state.agents || [];
+    state.currentAgentId = data?.me ? Number(data.me) : state.currentAgentId;
     state.settings = data?.settings || state.settings;
     state.tasks = data?.tasks || state.tasks || [];
     state.loadedTicketId = state.ticketId;
@@ -279,24 +329,22 @@
     return options.join('');
   }
 
+  function statusOptions(task) {
+    const statusValue = Number(task.status) || TASK_STATUS.OPEN;
+    return [TASK_STATUS.OPEN, TASK_STATUS.IN_PROGRESS, TASK_STATUS.COMPLETED]
+      .map(value => `<option value="${value}" ${value === statusValue ? 'selected' : ''}>${TASK_STATUS_LABELS[value]}</option>`)
+      .join('');
+  }
+
   function renderControls(task) {
     const busy = state.busyTaskIds.has(String(task.id)) || state.bulkBusy;
-    const checked = task.completed ? 'checked' : '';
-    const selected = state.selectedTaskIds.has(Number(task.id)) ? 'checked' : '';
     const disabled = busy ? 'disabled' : '';
-    const selectedLabel = selected ? '선택됨' : '선택';
-    const selectedClass = selected ? ' fsx-inline-pick-selected' : '';
-    const doneLabel = task.completed ? '완료됨' : '완료';
+    const statusValue = Number(task.status) || TASK_STATUS.OPEN;
 
     return `
-      <label class="fsx-inline-check fsx-inline-pick${selectedClass}" title="일괄 처리 대상으로 선택">
-        <input type="checkbox" class="fsx-inline-select" data-task-id="${task.id}" aria-label="작업 ${task.id} 선택" ${selected} ${state.bulkBusy ? 'disabled' : ''}>
-        <span>${selectedLabel}</span>
-      </label>
-      <label class="fsx-inline-check" title="완료 상태로 변경">
-        <input type="checkbox" class="fsx-inline-done" data-task-id="${task.id}" aria-label="작업 ${task.id} 완료 상태" ${checked} ${disabled}>
-        <span>${doneLabel}</span>
-      </label>
+      <select class="fsx-inline-status fsx-inline-status-${statusValue}" data-task-id="${task.id}" ${disabled} title="작업 상태 변경" aria-label="작업 ${task.id} 상태">
+        ${statusOptions(task)}
+      </select>
       <select class="fsx-inline-agent" data-task-id="${task.id}" ${disabled} title="에이전트 할당" aria-label="작업 ${task.id} 담당자 할당">
         ${agentOptions(task)}
       </select>
@@ -306,7 +354,7 @@
   function renderKeyFor(task) {
     return [
       task.id,
-      task.completed ? 'done' : 'open',
+      Number(task.status) || 0,
       task.agent_id || '',
       state.agents.map(agent => `${agent.id}:${agent.name}:${agent.email}`).join('|'),
       state.busyTaskIds.has(String(task.id)) ? 'busy' : 'idle',
@@ -350,6 +398,17 @@
     if (setTaskSelected(taskId, dragSelect.shouldSelect)) {
       dragSelect.changedCount += 1;
       injectInlineControls();
+    }
+  }
+
+  function sampleDragSelectionLine(x0, y0, x1, y1) {
+    const distance = Math.hypot(x1 - x0, y1 - y0);
+    const steps = Math.max(1, Math.ceil(distance / DRAG_SAMPLE_STEP_PX));
+    for (let i = 1; i <= steps; i += 1) {
+      const t = i / steps;
+      const x = x0 + (x1 - x0) * t;
+      const y = y0 + (y1 - y0) * t;
+      applyDragSelection(taskRowFromTarget(document.elementFromPoint(x, y)));
     }
   }
 
@@ -399,6 +458,7 @@
       unassigned,
       state.bulkBusy ? 'busy' : 'idle',
       selectedTaskIdsKey,
+      state.currentAgentId || '',
       state.agents.map(agent => `${agent.id}:${agent.name}`).join('|'),
     ].join('::');
     if (bar.dataset.renderKey === renderKey) return;
@@ -419,8 +479,15 @@
     const detailLabel = count
       ? `선택: 대기 ${stats.selectedOpen} · 완료 ${stats.selectedCompleted} · 미할당 ${stats.selectedUnassigned}`
       : `대기 ${stats.open} · 완료 ${stats.completed} · 미할당 ${stats.unassigned}`;
+    const selfAgent = state.currentAgentId
+      ? state.agents.find(agent => Number(agent.id) === Number(state.currentAgentId))
+      : null;
+    const otherAgents = state.agents.filter(agent => !selfAgent || Number(agent.id) !== Number(selfAgent.id));
     const agentOptionsHtml = ['<option value="">에이전트 선택</option>']
-      .concat(state.agents.map(agent => {
+      .concat(selfAgent ? [
+        `<option value="${selfAgent.id}" selected>${escapeHtml(selfAgent.name)} (나)</option>`,
+      ] : [])
+      .concat(otherAgents.map(agent => {
         const label = agent.email ? `${agent.name} (${agent.email})` : agent.name;
         return `<option value="${agent.id}">${escapeHtml(label)}</option>`;
       }))
@@ -441,11 +508,12 @@
         <button type="button" class="fsx-bulk-btn ghost muted" data-action="clear-selection" ${clearDisabled}>선택 비우기</button>
       </div>
       <div class="fsx-bulk-actions fsx-bulk-run-actions" aria-label="선택 작업 실행">
-        <button type="button" class="fsx-bulk-btn primary" data-action="bulk-complete" ${selectedDisabled}>완료 처리</button>
-        <button type="button" class="fsx-bulk-btn" data-action="bulk-open" ${selectedDisabled}>대기 전환</button>
+        <select class="fsx-bulk-agent" ${disabled} title="완료 처리/대기 전환 시 함께 할당할 에이전트" aria-label="완료 처리/대기 전환 시 함께 할당할 에이전트">${agentOptionsHtml}</select>
+        <button type="button" class="fsx-bulk-btn primary" data-action="bulk-complete" ${selectedDisabled}
+          title="선택한 작업을 완료 처리하고, 에이전트를 골랐다면 함께 할당합니다">완료 처리</button>
+        <button type="button" class="fsx-bulk-btn" data-action="bulk-open" ${selectedDisabled}
+          title="선택한 작업을 대기 상태로 바꾸고, 에이전트를 골랐다면 함께 할당합니다">대기 전환</button>
         <span class="fsx-bulk-divider"></span>
-        <select class="fsx-bulk-agent" ${disabled} title="일괄 할당할 에이전트" aria-label="일괄 할당할 에이전트">${agentOptionsHtml}</select>
-        <button type="button" class="fsx-bulk-btn" data-action="bulk-assign" ${selectedDisabled}>담당자 적용</button>
         <button type="button" class="fsx-bulk-btn" data-action="bulk-assign-unassigned" ${assignUnassignedDisabled}
           title="담당 에이전트가 없는 작업에만 할당합니다">미할당만 적용${unassigned ? ` (${unassigned})` : ''}</button>
         ${state.bulkBusy ? '<span class="fsx-inline-spinner">처리중…</span>' : ''}
@@ -469,8 +537,9 @@
       const selected = state.selectedTaskIds.has(Number(task.id));
       row.classList.add('fsx-inline-row');
       row.classList.toggle('fsx-inline-selected', selected);
+      row.classList.toggle('fsx-inline-completed', !!task.completed);
       row.dataset.fsxTaskId = String(task.id);
-      row.title = row.title || '드래그하면 여러 작업을 선택/해제할 수 있습니다';
+      row.title = row.title || '클릭하거나 드래그하면 작업을 선택/해제할 수 있습니다';
       let controls = row.querySelector(':scope > .fsx-inline-controls');
       if (!controls) {
         controls = document.createElement('div');
@@ -487,19 +556,20 @@
     });
   }
 
-  async function updateTaskStatus(taskId, checked) {
+  async function updateTaskStatus(taskId, status) {
     const key = String(taskId);
+    const statusValue = Number(status) || TASK_STATUS.OPEN;
     state.busyTaskIds.add(key);
     injectInlineControls();
     try {
       const response = await sendMessage('UPDATE_TASK_STATUS', {
         ticketId: state.ticketId,
         taskId: Number(taskId),
-        status: checked ? TASK_STATUS.COMPLETED : TASK_STATUS.OPEN,
+        status: statusValue,
       });
       if (!response.ok) throw new Error(response.message || '작업 상태 변경에 실패했습니다.');
       applyContext(response.data);
-      showToast(checked ? '완료 처리했습니다.' : '대기 상태로 변경했습니다.');
+      showToast(`${TASK_STATUS_LABELS[statusValue] || '대기'} 상태로 변경했습니다.`);
     } catch (error) {
       showToast(error.message, 'error');
     } finally {
@@ -596,50 +666,40 @@
       injectInlineControls();
       return;
     }
-    if (action === 'bulk-complete') {
-      runBulkUpdate(sortedSelectedTaskIds(), { status: TASK_STATUS.COMPLETED }, '완료 처리했습니다.');
+    if (action === 'bulk-complete' || action === 'bulk-open') {
+      const agentId = Number(document.querySelector('.fsx-bulk-agent')?.value || 0);
+      const status = action === 'bulk-complete' ? TASK_STATUS.COMPLETED : TASK_STATUS.OPEN;
+      const updates = { status };
+      const baseLabel = action === 'bulk-complete' ? '완료 처리' : '대기 상태로 변경';
+      let successLabel = `${baseLabel}했습니다.`;
+      if (agentId) {
+        updates.agentId = agentId;
+        const agent = state.agents.find(item => Number(item.id) === agentId);
+        successLabel = `${baseLabel} · ${agent?.name || '에이전트'} 할당 완료`;
+      }
+      runBulkUpdate(sortedSelectedTaskIds(), updates, successLabel);
       return;
     }
-    if (action === 'bulk-open') {
-      runBulkUpdate(sortedSelectedTaskIds(), { status: TASK_STATUS.OPEN }, '대기 상태로 변경했습니다.');
-      return;
-    }
-    if (action === 'bulk-assign' || action === 'bulk-assign-unassigned') {
-      const select = document.querySelector('.fsx-bulk-agent');
-      const agentId = Number(select?.value || 0);
+    if (action === 'bulk-assign-unassigned') {
+      const agentId = Number(document.querySelector('.fsx-bulk-agent')?.value || 0);
       if (!agentId) {
         showToast('일괄 할당할 에이전트를 먼저 선택해주세요.', 'warning');
         return;
       }
       const agent = state.agents.find(item => Number(item.id) === agentId);
-
-      if (action === 'bulk-assign-unassigned') {
-        const targets = unassignedTasks().map(task => Number(task.id));
-        if (!targets.length) {
-          showToast('담당 에이전트가 없는 작업이 없습니다.', 'warning');
-          return;
-        }
-        runBulkUpdate(targets, { agentId }, `${agent?.name || '에이전트'} 할당 완료 (미할당 작업)`);
+      const targets = unassignedTasks().map(task => Number(task.id));
+      if (!targets.length) {
+        showToast('담당 에이전트가 없는 작업이 없습니다.', 'warning');
         return;
       }
-
-      runBulkUpdate(sortedSelectedTaskIds(), { agentId }, `${agent?.name || '에이전트'} 할당 완료`);
+      runBulkUpdate(targets, { agentId }, `${agent?.name || '에이전트'} 할당 완료 (미할당 작업)`);
     }
   }
 
   function handleChange(event) {
-    const selectInput = event.target.closest('.fsx-inline-select');
-    if (selectInput) {
-      const taskId = Number(selectInput.dataset.taskId);
-      if (selectInput.checked) state.selectedTaskIds.add(taskId);
-      else state.selectedTaskIds.delete(taskId);
-      injectInlineControls();
-      return;
-    }
-
-    const statusInput = event.target.closest('.fsx-inline-done');
-    if (statusInput) {
-      updateTaskStatus(statusInput.dataset.taskId, statusInput.checked);
+    const statusSelect = event.target.closest('.fsx-inline-status');
+    if (statusSelect) {
+      updateTaskStatus(statusSelect.dataset.taskId, statusSelect.value);
       return;
     }
 
@@ -661,6 +721,8 @@
       shouldSelect: !state.selectedTaskIds.has(taskId),
       startX: event.clientX,
       startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
       startRow: row,
       touched: new Set(),
       changedCount: 0,
@@ -681,11 +743,18 @@
       dragSelect.active = true;
       document.documentElement.classList.add('fsx-drag-selecting');
       applyDragSelection(dragSelect.startRow);
+      dragSelect.lastX = dragSelect.startX;
+      dragSelect.lastY = dragSelect.startY;
     }
 
     event.preventDefault();
-    const row = taskRowFromTarget(document.elementFromPoint(event.clientX, event.clientY));
-    applyDragSelection(row);
+    const coalesced = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [];
+    const points = coalesced.length ? coalesced : [event];
+    points.forEach(point => {
+      sampleDragSelectionLine(dragSelect.lastX, dragSelect.lastY, point.clientX, point.clientY);
+      dragSelect.lastX = point.clientX;
+      dragSelect.lastY = point.clientY;
+    });
   }
 
   function handlePointerEnd(event) {
@@ -708,13 +777,25 @@
       return;
     }
 
-    if (!event.target.closest('.fsx-inline-controls,.fsx-bulk-bar')) return;
+    if (event.target.closest('.fsx-inline-controls,.fsx-bulk-bar')) {
+      event.stopPropagation();
+      return;
+    }
+
+    const row = taskRowFromTarget(event.target);
+    const taskId = taskIdFromRow(row);
+    if (!taskId || state.bulkBusy || isDragSelectIgnoredTarget(event.target)) return;
+
     event.stopPropagation();
+    event.preventDefault();
+    setTaskSelected(taskId, !state.selectedTaskIds.has(taskId));
+    injectInlineControls();
   }
 
   function watchPage() {
     let lastUrl = location.href;
-    setInterval(() => {
+    watchIntervalId = setInterval(() => {
+      if (contextInvalidated) return;
       syncThemeClass();
       const nextTicketId = extractTicketId();
       if (location.href !== lastUrl || nextTicketId !== state.ticketId) {
@@ -730,11 +811,12 @@
       }
     }, 1200);
 
-    const observer = new MutationObserver(() => {
+    pageObserver = new MutationObserver(() => {
+      if (contextInvalidated) return;
       syncThemeClass();
       injectInlineControls();
     });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    pageObserver.observe(document.documentElement, { childList: true, subtree: true });
   }
 
   document.addEventListener('change', handleChange, true);

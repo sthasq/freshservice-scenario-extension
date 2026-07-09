@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Freshservice 작업 시나리오",
-  "version": "0.4.4",
+  "version": "0.4.10",
   "description": "Freshservice 티켓 화면에서 작업 시나리오를 생성하고 완료 상태를 체크합니다.",
   "permissions": ["storage"],
   "host_permissions": ["https://*.freshservice.com/*"],
