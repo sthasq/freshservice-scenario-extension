@@ -32,7 +32,7 @@
   const DOM_UPDATE_DEBOUNCE_MS = 120;
   const DRAG_SELECT_THRESHOLD_PX = 6;
   const DRAG_SAMPLE_STEP_PX = 12;
-  const EXTENSION_ROOT_SELECTOR = '.fsx-inline-controls,.fsx-bulk-bar,.fsx-inline-toast,.fsx-agent-picker';
+  const EXTENSION_ROOT_SELECTOR = '.fsx-inline-controls,.fsx-bulk-host,.fsx-bulk-bar,.fsx-inline-toast,.fsx-agent-picker';
   const AGENT_RESULT_LIMIT = 8;
   const THEME_SYNC_THROTTLE_MS = 5000;
   const URL_CHECK_INTERVAL_MS = 1000;
@@ -676,7 +676,7 @@
 
   function removeBulkBar() {
     if (agentPickerTarget?.anchor?.closest?.('.fsx-bulk-bar')) closeAgentPicker();
-    document.querySelector('.fsx-bulk-bar')?.remove();
+    document.querySelector('.fsx-bulk-host')?.remove();
   }
 
   function renderBulkBar(rows) {
@@ -685,11 +685,21 @@
       return;
     }
 
-    let bar = document.querySelector('.fsx-bulk-bar');
+    const anchor = rows[0].row;
+    let host = document.querySelector('.fsx-bulk-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.className = 'fsx-bulk-host';
+    }
+    if (host.parentElement !== anchor.parentElement || host.nextElementSibling !== anchor) {
+      anchor.parentElement.insertBefore(host, anchor);
+    }
+
+    let bar = host.querySelector('.fsx-bulk-bar');
     if (!bar) {
       bar = document.createElement('div');
       bar.className = 'fsx-bulk-bar';
-      document.documentElement.appendChild(bar);
+      host.appendChild(bar);
     }
 
     const stats = selectionStats();

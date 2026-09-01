@@ -59,7 +59,7 @@ Your API key is not sent to any third-party server. It is stored only in this br
 
 ### Bulk Updates
 
-When ticket tasks are visible, a compact bulk action bar appears at the bottom of the page without changing the task-list layout.
+When ticket tasks are visible, a compact bulk action bar appears above the first task and stays at the top of the task list while scrolling.
 
 1. Select target tasks by clicking a row, dragging across rows, or using the bulk action bar.
    - Drag across task rows to select or deselect multiple tasks quickly.
