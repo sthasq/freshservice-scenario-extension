@@ -13,148 +13,506 @@
   user-select: none !important;
 }
 
-.fsx-drag-selecting .fsx-inline-row {
-  transition: border-color .08s ease, box-shadow .08s ease;
-}
-
 .fsx-inline-row.fsx-inline-selected {
   border-color: rgba(51, 112, 255, .72) !important;
-  box-shadow: inset 4px 0 0 #3370ff, 0 0 0 1px rgba(51, 112, 255, .22) !important;
+  box-shadow: inset 4px 0 0 #3370ff, 0 0 0 1px rgba(51, 112, 255, .2) !important;
+}
+
+.fsx-inline-row.fsx-inline-selected::after,
+.fsx-inline-row.fsx-inline-completed::before {
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
 }
 
 .fsx-inline-row.fsx-inline-selected::after {
-  background: rgba(51, 112, 255, .07);
-  border-radius: inherit;
-  content: "";
-  inset: 0;
-  pointer-events: none;
-  position: absolute;
-  z-index: 1;
+  background: rgba(51, 112, 255, .055);
 }
 
 .fsx-inline-row.fsx-inline-completed::before {
-  background: rgba(47, 133, 90, .08);
-  border-radius: inherit;
-  content: "";
-  inset: 0;
-  pointer-events: none;
-  position: absolute;
-  z-index: 1;
+  background: rgba(47, 133, 90, .055);
 }
 
 .fsx-inline-row.fsx-inline-completed:not(.fsx-inline-selected) {
-  box-shadow: inset 4px 0 0 #2f855a, 0 0 0 1px rgba(47, 133, 90, .2) !important;
+  box-shadow: inset 4px 0 0 #2f855a, 0 0 0 1px rgba(47, 133, 90, .18) !important;
 }
 
 .fsx-inline-controls {
   align-items: center;
-  background: #fff;
-  border: 1px solid #dfe6ef;
-  border-radius: 7px;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, .08);
   color: #17212b;
   display: inline-flex;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
-  gap: 10px;
-  min-height: 40px;
-  padding: 5px 8px;
-  position: absolute;
-  right: 56px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2147483646;
+  gap: 5px;
+  margin-inline-start: 8px;
+  position: relative;
+  vertical-align: middle;
+  white-space: nowrap;
+  z-index: 3;
 }
 
 .fsx-inline-controls-selected {
-  border-color: #3370ff;
-  box-shadow: 0 8px 24px rgba(51, 112, 255, .2);
+  filter: drop-shadow(0 3px 8px rgba(51, 112, 255, .16));
 }
 
 .fsx-inline-status {
-  background: #fff;
-  border: 1px solid #ccd5df;
-  border-radius: 6px;
-  color: #3d4752;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
-  font-size: 13px;
+  appearance: auto;
+  background: #f7f9fb;
+  border: 1px solid #d8e0e8;
+  border-radius: 999px;
+  color: #46515d;
+  font-family: inherit;
+  font-size: 11px;
   font-weight: 800;
-  height: 30px;
-  min-width: 88px;
+  height: 28px;
+  min-width: 72px;
   outline: none;
-  padding: 0 26px 0 10px;
+  padding: 0 20px 0 9px;
 }
 
 .fsx-inline-status-2 {
-  background: #fff7e6;
-  border-color: #f0c96b;
-  color: #8a5b00;
+  background: #fff8e6;
+  border-color: #ecd07f;
+  color: #7a5500;
 }
 
 .fsx-inline-status-3 {
-  background: #2f855a;
-  border-color: #2f855a;
+  background: #e9f7ef;
+  border-color: #a7d8ba;
+  color: #247248;
+}
+
+.fsx-inline-status:focus-visible,
+.fsx-agent-trigger:focus-visible,
+.fsx-bulk-btn:focus-visible,
+.fsx-agent-search:focus-visible,
+.fsx-agent-result:focus-visible {
+  outline: 2px solid #3370ff;
+  outline-offset: 2px;
+}
+
+.fsx-agent-trigger {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d8e0e8;
+  border-radius: 999px;
+  box-sizing: border-box;
+  color: #27313c;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 750;
+  gap: 6px;
+  height: 28px;
+  max-width: 168px;
+  min-width: 112px;
+  padding: 0 8px 0 4px;
+}
+
+.fsx-agent-trigger:hover:not(:disabled),
+.fsx-agent-trigger[aria-expanded="true"] {
+  background: #f1f5ff;
+  border-color: #8fb0ff;
+  color: #1f4fb8;
+}
+
+.fsx-agent-trigger-avatar {
+  align-items: center;
+  background: #e9efff;
+  border-radius: 50%;
+  color: #275bd4;
+  display: inline-flex;
+  flex: 0 0 20px;
+  font-size: 9px;
+  font-weight: 900;
+  height: 20px;
+  justify-content: center;
+  letter-spacing: -.3px;
+  overflow: hidden;
+}
+
+.fsx-agent-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fsx-agent-trigger-chevron {
+  border-bottom: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
+  flex: 0 0 6px;
+  height: 6px;
+  margin-left: auto;
+  margin-right: 2px;
+  transform: rotate(45deg) translateY(-2px);
+  width: 6px;
+}
+
+.fsx-inline-status:disabled,
+.fsx-agent-trigger:disabled,
+.fsx-bulk-btn:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.fsx-inline-spinner {
+  color: #7d8996;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.fsx-agent-picker {
+  background: #fff;
+  border: 1px solid #d8e0e8;
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, .22), 0 2px 8px rgba(15, 23, 42, .08);
+  box-sizing: border-box;
+  color: #17212b;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+  overflow: hidden;
+  position: fixed;
+  z-index: 2147483647;
+}
+
+.fsx-agent-picker[hidden] {
+  display: none !important;
+}
+
+.fsx-agent-picker-head {
+  align-items: center;
+  border-bottom: 1px solid #edf0f3;
+  display: flex;
+  gap: 8px;
+  padding: 10px 10px 9px 12px;
+}
+
+.fsx-agent-search-icon {
+  border: 2px solid #7d8996;
+  border-radius: 50%;
+  box-sizing: border-box;
+  flex: 0 0 14px;
+  height: 14px;
+  position: relative;
+}
+
+.fsx-agent-search-icon::after {
+  background: #7d8996;
+  content: "";
+  height: 2px;
+  position: absolute;
+  right: -5px;
+  top: 10px;
+  transform: rotate(45deg);
+  width: 6px;
+}
+
+.fsx-agent-search {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: #17212b;
+  flex: 1;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  height: 30px;
+  min-width: 0;
+  outline: 0 !important;
+}
+
+.fsx-agent-search::-webkit-search-cancel-button {
+  display: none;
+}
+
+.fsx-agent-picker-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: #7d8996;
+  cursor: pointer;
+  display: flex;
+  font-size: 20px;
+  height: 28px;
+  justify-content: center;
+  line-height: 1;
+  width: 28px;
+}
+
+.fsx-agent-picker-close:hover {
+  background: #f1f4f7;
+  color: #27313c;
+}
+
+.fsx-agent-results {
+  max-height: 328px;
+  overflow: auto;
+  padding: 6px;
+}
+
+.fsx-agent-result {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: #27313c;
+  cursor: pointer;
+  display: flex;
+  font-family: inherit;
+  gap: 10px;
+  min-height: 48px;
+  padding: 7px 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.fsx-agent-result:hover,
+.fsx-agent-result.active {
+  background: #eef4ff;
+}
+
+.fsx-agent-avatar {
+  align-items: center;
+  background: #e9efff;
+  border-radius: 50%;
+  color: #275bd4;
+  display: flex;
+  flex: 0 0 32px;
+  font-size: 11px;
+  font-weight: 900;
+  height: 32px;
+  justify-content: center;
+}
+
+.fsx-agent-result-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fsx-agent-result-name {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.fsx-agent-result-name em {
+  background: #dce8ff;
+  border-radius: 999px;
+  color: #275bd4;
+  font-size: 9px;
+  font-style: normal;
+  padding: 2px 5px;
+}
+
+.fsx-agent-result-email {
+  color: #75808c;
+  font-size: 11px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fsx-agent-selected {
+  color: #2f855a;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.fsx-agent-empty {
+  align-items: center;
+  color: #75808c;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 5px;
+  padding: 28px 12px;
+  text-align: center;
+}
+
+.fsx-agent-empty strong {
+  color: #3d4752;
+  font-size: 13px;
+}
+
+.fsx-agent-more,
+.fsx-agent-picker-hint {
+  color: #8b96a2;
+  font-size: 10px;
+  font-weight: 650;
+  padding: 7px 10px;
+  text-align: center;
+}
+
+.fsx-agent-picker-hint {
+  background: #f8fafc;
+  border-top: 1px solid #edf0f3;
+}
+
+.fsx-inline-toast {
+  background: #17212b;
+  border-radius: 9px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, .2);
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.45;
+  max-width: 380px;
+  padding: 11px 15px;
+  position: fixed;
+  right: 24px;
+  top: 72px;
+  z-index: 2147483647;
+}
+
+.fsx-inline-toast.success { background: #1f7a45; }
+.fsx-inline-toast.warning { background: #a66516; }
+.fsx-inline-toast.error { background: #b42318; }
+
+.fsx-bulk-bar {
+  align-items: center;
+  background: rgba(255, 255, 255, .97);
+  border: 1px solid #d8e0e8;
+  border-radius: 12px;
+  bottom: 18px;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, .2), 0 2px 8px rgba(15, 23, 42, .08);
+  box-sizing: border-box;
+  color: #17212b;
+  display: flex;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+  gap: 6px;
+  left: 50%;
+  max-width: calc(100vw - 28px);
+  padding: 7px;
+  position: fixed;
+  transform: translateX(-50%);
+  width: max-content;
+  z-index: 2147483645;
+}
+
+.fsx-bulk-bar-active {
+  border-color: #8fb0ff;
+  box-shadow: 0 16px 44px rgba(51, 112, 255, .22), 0 2px 8px rgba(15, 23, 42, .08);
+}
+
+.fsx-bulk-summary,
+.fsx-bulk-actions {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+.fsx-bulk-summary {
+  padding: 0 5px 0 2px;
+}
+
+.fsx-bulk-title {
+  align-items: center;
+  background: #3370ff;
+  border-radius: 50%;
+  color: #fff;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 900;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+.fsx-bulk-count {
+  color: #27364a;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.fsx-bulk-count.active { color: #1f4fb8; }
+
+.fsx-bulk-meta {
+  color: #75808c;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.fsx-bulk-pick-actions {
+  border-left: 1px solid #e5eaf0;
+  padding-left: 5px;
+}
+
+.fsx-bulk-run-actions {
+  background: #f4f7fb;
+  border-radius: 8px;
+  margin-left: 2px;
+  padding: 3px;
+}
+
+.fsx-bulk-btn {
+  background: #fff;
+  border: 1px solid #d8e0e8;
+  border-radius: 7px;
+  color: #27313c;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  height: 28px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.fsx-bulk-btn:hover:not(:disabled) { background: #e9eef5; }
+
+.fsx-bulk-btn.primary {
+  background: #3370ff;
+  border-color: #3370ff;
   color: #fff;
 }
 
-.fsx-inline-status:focus {
-  border-color: #c9362c;
-  box-shadow: 0 0 0 3px rgba(201, 54, 44, .12);
+.fsx-bulk-btn.primary:hover:not(:disabled) { background: #2859d8; }
+
+.fsx-bulk-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: #4d5966;
 }
 
-.fsx-inline-agent {
+.fsx-bulk-btn.ghost:hover:not(:disabled) {
+  background: #e9eef5;
+  color: #1f4fb8;
+}
+
+.fsx-bulk-btn.muted { color: #75808c; }
+
+.fsx-bulk-agent-trigger {
   background: #fff;
-  border: 1px solid #ccd5df;
-  border-radius: 6px;
-  box-sizing: border-box;
-  color: #17212b;
-  cursor: text;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
-  font-size: 13px;
-  font-weight: 800;
-  height: 30px;
-  max-width: 260px;
-  min-width: 224px;
-  outline: none;
-  padding: 0 28px 0 10px;
-  text-overflow: ellipsis;
-}
-
-.fsx-inline-agent:focus {
-  border-color: #c9362c;
-  box-shadow: 0 0 0 3px rgba(201, 54, 44, .12);
-}
-
-.fsx-dark-mode .fsx-inline-controls {
-  background: #111820;
-  border-color: #273241;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, .34);
-  color: #e8eef6;
+  border-radius: 7px;
+  height: 28px;
+  max-width: 160px;
+  min-width: 126px;
 }
 
 .fsx-dark-mode .fsx-inline-row.fsx-inline-selected {
   border-color: rgba(106, 164, 255, .82) !important;
-  box-shadow: inset 4px 0 0 #6aa4ff, 0 0 0 1px rgba(106, 164, 255, .26) !important;
+  box-shadow: inset 4px 0 0 #6aa4ff, 0 0 0 1px rgba(106, 164, 255, .24) !important;
 }
 
-.fsx-dark-mode .fsx-inline-row.fsx-inline-selected::after {
-  background: rgba(106, 164, 255, .1);
-}
+.fsx-dark-mode .fsx-inline-row.fsx-inline-selected::after { background: rgba(106, 164, 255, .08); }
+.fsx-dark-mode .fsx-inline-row.fsx-inline-completed::before { background: rgba(72, 187, 130, .08); }
 
-.fsx-dark-mode .fsx-inline-row.fsx-inline-completed::before {
-  background: rgba(72, 187, 130, .12);
-}
-
-.fsx-dark-mode .fsx-inline-row.fsx-inline-completed:not(.fsx-inline-selected) {
-  box-shadow: inset 4px 0 0 #48bb82, 0 0 0 1px rgba(72, 187, 130, .28) !important;
-}
-
-.fsx-dark-mode .fsx-inline-controls-selected {
-  border-color: #6aa4ff;
-  box-shadow: 0 10px 26px rgba(106, 164, 255, .18);
-}
-
-.fsx-dark-mode .fsx-inline-status {
-  background: #0b1118;
+.fsx-dark-mode .fsx-inline-status,
+.fsx-dark-mode .fsx-agent-trigger {
+  background: #111820;
   border-color: #344255;
   color: #e8eef6;
   color-scheme: dark;
@@ -167,349 +525,78 @@
 }
 
 .fsx-dark-mode .fsx-inline-status-3 {
-  background: #48bb82;
-  border-color: #48bb82;
-  color: #06170f;
+  background: #123623;
+  border-color: #2f855a;
+  color: #8de1b2;
 }
 
-.fsx-dark-mode .fsx-inline-status:focus {
-  border-color: #6aa4ff;
-  box-shadow: 0 0 0 3px rgba(106, 164, 255, .18);
-}
-
-.fsx-dark-mode .fsx-inline-agent {
-  background: #0b1118;
-  border-color: #344255;
-  color: #f3f7fb;
-  color-scheme: dark;
-}
-
-.fsx-dark-mode .fsx-inline-agent:focus {
-  border-color: #6aa4ff;
-  box-shadow: 0 0 0 3px rgba(106, 164, 255, .18);
-}
-
-.fsx-dark-mode .fsx-inline-spinner {
-  color: #a8b5c4;
-}
-
-.fsx-inline-status:disabled,
-.fsx-inline-agent:disabled {
-  cursor: not-allowed;
-  opacity: .55;
-}
-
-.fsx-inline-spinner {
-  color: #8d98a5;
-  font-size: 11px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.fsx-inline-toast {
-  background: #17212b;
-  border-radius: 8px;
-  box-shadow: 0 14px 34px rgba(15, 23, 42, .2);
-  color: #fff;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
-  font-size: 13.5px;
-  font-weight: 800;
-  line-height: 1.45;
-  max-width: 380px;
-  padding: 12px 16px;
-  position: fixed;
-  right: 28px;
-  top: 78px;
-  z-index: 2147483647;
-}
-
-.fsx-inline-toast.success {
-  background: #1f7a45;
-}
-
-.fsx-inline-toast.warning {
-  background: #b7791f;
-}
-
-.fsx-inline-toast.error {
-  background: #b42318;
-}
-
-.fsx-bulk-bar {
-  align-items: center;
-  background: #f8fbff;
-  border: 1px solid #b9cdfc;
-  border-left: 5px solid #3370ff;
-  border-radius: 10px;
-  box-shadow: 0 10px 26px rgba(51, 112, 255, .12);
-  box-sizing: border-box;
-  color: #17212b;
-  display: flex;
-  flex-wrap: wrap;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
-  gap: 8px 10px;
-  justify-content: space-between;
-  margin: 8px 0 14px;
-  padding: 10px 12px;
-  position: sticky;
-  top: 8px;
-  width: 100%;
-  z-index: 2147483645;
-}
-
-.fsx-bulk-bar-active {
-  background: #eef4ff;
-  border-color: #8fb0ff;
-  box-shadow: 0 12px 30px rgba(51, 112, 255, .18);
-}
-
-.fsx-bulk-summary,
-.fsx-bulk-actions {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  min-width: 0;
-}
-
-.fsx-bulk-summary {
-  flex: 1 1 260px;
-  flex-wrap: wrap;
-}
-
-.fsx-bulk-actions {
-  flex: 0 1 auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.fsx-bulk-run-actions {
-  align-self: center;
-  background: #fff;
-  border: 1px solid rgba(185, 205, 252, .7);
-  border-radius: 8px;
-  padding: 6px;
-}
-
-.fsx-bulk-pick-actions {
-  flex: 1 1 300px;
-}
-
-.fsx-bulk-pick-actions .fsx-bulk-btn {
-  height: 34px;
-  padding: 0 14px;
-}
-
-.fsx-bulk-title {
-  background: #3370ff;
-  border-radius: 999px;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0;
-  padding: 5px 9px;
-  white-space: nowrap;
-}
-
-.fsx-bulk-count {
-  color: #27364a;
-  font-size: 14px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.fsx-bulk-count.active {
-  color: #1f4fb8;
-}
-
-.fsx-bulk-meta {
-  color: #68727d;
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.fsx-bulk-btn {
-  background: #fff;
-  border: 1px solid #ccd5df;
-  border-radius: 6px;
-  color: #17212b;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 800;
-  height: 30px;
-  max-width: 100%;
-  padding: 0 12px;
-  white-space: nowrap;
-}
-
-.fsx-bulk-btn:hover:not(:disabled) {
-  background: #e8eef5;
-}
-
-.fsx-bulk-btn.primary {
-  background: #3370ff;
-  border-color: #3370ff;
-  color: #fff;
-}
-
-.fsx-bulk-btn.primary:hover:not(:disabled) {
-  background: #2859d8;
-}
-
-.fsx-bulk-btn.ghost {
-  background: transparent;
-  border-color: transparent;
-  color: #3d4752;
-}
-
-.fsx-bulk-btn.ghost:hover:not(:disabled) {
-  background: rgba(51, 112, 255, .08);
-  color: #1f4fb8;
-}
-
-.fsx-bulk-btn.muted {
-  color: #68727d;
-}
-
-.fsx-bulk-btn:disabled,
-.fsx-bulk-agent:disabled {
-  cursor: not-allowed;
-  opacity: .55;
-}
-
-.fsx-bulk-agent {
-  background: #fff;
-  border: 1px solid #ccd5df;
-  border-radius: 6px;
-  box-sizing: border-box;
-  color: #17212b;
-  cursor: text;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 800;
-  height: 30px;
-  max-width: 240px;
-  min-width: 180px;
-  outline: none;
-  padding: 0 28px 0 10px;
-  text-overflow: ellipsis;
-}
-
-.fsx-bulk-agent:focus {
-  border-color: #c9362c;
-  box-shadow: 0 0 0 3px rgba(201, 54, 44, .12);
-}
-
-.fsx-bulk-divider {
-  background: #dfe6ef;
-  height: 20px;
-  width: 1px;
-}
-
-.fsx-dark-mode .fsx-bulk-bar {
-  background: #111c2a;
-  border-color: #2d5f9f;
-  border-left-color: #6aa4ff;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .42);
-  color: #e8eef6;
-}
-
-.fsx-dark-mode .fsx-bulk-bar-active {
-  background: #14243a;
+.fsx-dark-mode .fsx-agent-trigger:hover:not(:disabled),
+.fsx-dark-mode .fsx-agent-trigger[aria-expanded="true"] {
+  background: #172941;
   border-color: #4f86d9;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .46);
-}
-
-.fsx-dark-mode .fsx-bulk-run-actions {
-  background: #0b1118;
-  border-color: #273241;
-}
-
-.fsx-dark-mode .fsx-bulk-title {
-  background: #6aa4ff;
-  color: #06111f;
-}
-
-.fsx-dark-mode .fsx-bulk-count {
-  color: #a8b5c4;
-}
-
-.fsx-dark-mode .fsx-bulk-count.active {
   color: #dbeafe;
 }
 
-.fsx-dark-mode .fsx-bulk-meta {
-  color: #a8b5c4;
+.fsx-dark-mode .fsx-agent-trigger-avatar,
+.fsx-dark-mode .fsx-agent-avatar {
+  background: #203b63;
+  color: #dbeafe;
 }
 
-.fsx-dark-mode .fsx-bulk-btn {
-  background: #1a2430;
+.fsx-dark-mode .fsx-agent-picker,
+.fsx-dark-mode .fsx-bulk-bar {
+  background: rgba(17, 24, 32, .98);
   border-color: #344255;
   color: #e8eef6;
 }
 
-.fsx-dark-mode .fsx-bulk-btn:hover:not(:disabled) {
-  background: #223042;
+.fsx-dark-mode .fsx-agent-picker-head,
+.fsx-dark-mode .fsx-agent-picker-hint { border-color: #273241; }
+.fsx-dark-mode .fsx-agent-search { color: #f3f7fb; }
+.fsx-dark-mode .fsx-agent-picker-close { color: #a8b5c4; }
+.fsx-dark-mode .fsx-agent-picker-close:hover { background: #223042; color: #fff; }
+.fsx-dark-mode .fsx-agent-result { color: #e8eef6; }
+.fsx-dark-mode .fsx-agent-result:hover,
+.fsx-dark-mode .fsx-agent-result.active { background: #172941; }
+.fsx-dark-mode .fsx-agent-result-email,
+.fsx-dark-mode .fsx-agent-more,
+.fsx-dark-mode .fsx-agent-picker-hint { color: #a8b5c4; }
+.fsx-dark-mode .fsx-agent-picker-hint { background: #0b1118; }
+.fsx-dark-mode .fsx-agent-empty strong { color: #e8eef6; }
+.fsx-dark-mode .fsx-agent-result-name em { background: #203b63; color: #dbeafe; }
+.fsx-dark-mode .fsx-agent-selected { color: #8de1b2; }
+.fsx-dark-mode .fsx-bulk-bar-active { border-color: #4f86d9; }
+.fsx-dark-mode .fsx-bulk-count { color: #d4dde8; }
+.fsx-dark-mode .fsx-bulk-count.active { color: #dbeafe; }
+.fsx-dark-mode .fsx-bulk-meta { color: #a8b5c4; }
+.fsx-dark-mode .fsx-bulk-pick-actions { border-color: #344255; }
+.fsx-dark-mode .fsx-bulk-run-actions { background: #0b1118; }
+.fsx-dark-mode .fsx-bulk-btn { background: #1a2430; border-color: #344255; color: #e8eef6; }
+.fsx-dark-mode .fsx-bulk-btn:hover:not(:disabled) { background: #223042; }
+.fsx-dark-mode .fsx-bulk-btn.primary { background: #6aa4ff; border-color: #6aa4ff; color: #06111f; }
+.fsx-dark-mode .fsx-bulk-btn.ghost { background: transparent; border-color: transparent; color: #a8b5c4; }
+.fsx-dark-mode .fsx-inline-spinner { color: #a8b5c4; }
+
+@media (max-width: 900px) {
+  .fsx-bulk-bar {
+    bottom: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: calc(100vw - 20px);
+  }
+
+  .fsx-bulk-meta { display: none; }
+  .fsx-bulk-run-actions { margin-left: 0; }
 }
 
-.fsx-dark-mode .fsx-bulk-btn.primary {
-  background: #6aa4ff;
-  border-color: #6aa4ff;
-  color: #06111f;
-}
-
-.fsx-dark-mode .fsx-bulk-btn.ghost {
-  background: transparent;
-  border-color: transparent;
-  color: #a8b5c4;
-}
-
-.fsx-dark-mode .fsx-bulk-btn.ghost:hover:not(:disabled) {
-  background: rgba(106, 164, 255, .12);
-  color: #dbeafe;
-}
-
-.fsx-dark-mode .fsx-bulk-agent {
-  background: #0b1118;
-  border-color: #344255;
-  color: #f3f7fb;
-  color-scheme: dark;
-}
-
-.fsx-dark-mode .fsx-bulk-agent:focus {
-  border-color: #6aa4ff;
-  box-shadow: 0 0 0 3px rgba(106, 164, 255, .18);
-}
-
-.fsx-dark-mode .fsx-bulk-divider {
-  background: #273241;
-}
-
-@media (max-width: 1100px) {
+@media (max-width: 640px) {
   .fsx-inline-controls {
-    position: static;
-    transform: none;
-    margin-left: 12px;
-  }
-}
-
-@media (max-width: 760px) {
-  .fsx-bulk-bar,
-  .fsx-bulk-actions,
-  .fsx-bulk-summary {
-    align-items: stretch;
+    display: flex;
+    margin: 6px 0 0;
+    width: max-content;
   }
 
-  .fsx-bulk-actions,
-  .fsx-bulk-run-actions,
-  .fsx-bulk-pick-actions {
-    flex: 1 1 100%;
-    justify-content: flex-start;
-  }
-
-  .fsx-bulk-agent {
-    flex: 1 1 180px;
-    min-width: 160px;
-  }
+  .fsx-agent-trigger { max-width: 142px; }
+  .fsx-bulk-summary { flex: 1 1 auto; }
+  .fsx-bulk-pick-actions { border-left: 0; }
 }

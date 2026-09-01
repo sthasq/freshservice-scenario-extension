@@ -32,13 +32,16 @@
   const DOM_UPDATE_DEBOUNCE_MS = 120;
   const DRAG_SELECT_THRESHOLD_PX = 6;
   const DRAG_SAMPLE_STEP_PX = 12;
-  const EXTENSION_ROOT_SELECTOR = '.fsx-inline-controls,.fsx-bulk-bar,.fsx-inline-toast,.fsx-agent-datalist';
+  const EXTENSION_ROOT_SELECTOR = '.fsx-inline-controls,.fsx-bulk-bar,.fsx-inline-toast,.fsx-agent-picker';
+  const AGENT_RESULT_LIMIT = 8;
   const THEME_SYNC_THROTTLE_MS = 5000;
   const URL_CHECK_INTERVAL_MS = 1000;
 
-  let agentIdByInputValue = new Map();
-  let agentInputValueById = new Map();
+  let agentById = new Map();
+  let agentPickerIndex = 0;
+  let agentPickerTarget = null;
   let agentsVersion = 0;
+  let bulkAgentId = null;
   let contextLoadPromise = null;
   let contextInvalidated = false;
   let dragSelect = null;
@@ -199,51 +202,191 @@
     }, TOAST_DURATION_MS[type] || TOAST_DURATION_MS.success);
   }
 
-  function agentInputValue(agent) {
-    const label = agent?.email ? `${agent.name} (${agent.email})` : agent?.name || `Agent ${agent?.id || ''}`;
-    return `${label} [#${agent?.id}]`;
+  function normalizeAgentSearch(value) {
+    return String(value || '')
+      .normalize('NFKC')
+      .toLocaleLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function agentName(agent) {
+    return String(agent?.name || agent?.email || '담당자').trim();
+  }
+
+  function agentForId(agentId) {
+    return agentById.get(Number(agentId || 0)) || null;
+  }
+
+  function agentInitials(agent) {
+    const name = agentName(agent);
+    const words = name.split(/\s+/).filter(Boolean);
+    if (!words.length) return '?';
+    if (words.length === 1) return Array.from(words[0]).slice(0, 2).join('').toUpperCase();
+    return `${Array.from(words[0])[0] || ''}${Array.from(words.at(-1))[0] || ''}`.toUpperCase();
   }
 
   function rebuildAgentLookup() {
-    agentIdByInputValue = new Map();
-    agentInputValueById = new Map();
+    agentById = new Map();
     state.agents.forEach(agent => {
-      const value = agentInputValue(agent);
-      agentIdByInputValue.set(value, Number(agent.id));
-      agentInputValueById.set(Number(agent.id), value);
+      agentById.set(Number(agent.id), agent);
     });
     agentsVersion += 1;
-    ensureAgentDatalist();
   }
 
-  function ensureAgentDatalist() {
-    let list = document.getElementById('fsx-agent-options');
-    if (!list) {
-      list = document.createElement('datalist');
-      list.id = 'fsx-agent-options';
-      list.className = 'fsx-agent-datalist';
-      document.documentElement.appendChild(list);
+  function displayNameForAgentId(agentId, fallback = '담당자 선택') {
+    const agent = agentForId(agentId);
+    if (agent) return agentName(agent);
+    return agentId ? '담당자 지정됨' : fallback;
+  }
+
+  function agentSearchScore(agent, query) {
+    if (!query) {
+      if (Number(agent.id) === Number(state.currentAgentId)) return -2;
+      if (Number(agent.id) === Number(agentPickerTarget?.selectedAgentId)) return -1;
+      return 10;
     }
-    if (list.dataset.agentsVersion === String(agentsVersion)) return;
-    list.dataset.agentsVersion = String(agentsVersion);
-    list.innerHTML = state.agents
-      .map(agent => `<option value="${escapeHtml(agentInputValue(agent))}"></option>`)
-      .join('');
+
+    const name = normalizeAgentSearch(agent.name);
+    const email = normalizeAgentSearch(agent.email);
+    const haystack = `${name} ${email}`;
+    const tokens = query.split(' ').filter(Boolean);
+    if (!tokens.every(token => haystack.includes(token))) return null;
+    if (name === query) return 0;
+    if (name.startsWith(query)) return 1;
+    if (name.split(' ').some(word => word.startsWith(query))) return 2;
+    if (name.includes(query)) return 3;
+    if (email.startsWith(query)) return 4;
+    return 5;
   }
 
-  function displayValueForAgentId(agentId) {
-    const numeric = Number(agentId || 0);
-    if (!numeric) return '';
-    return agentInputValueById.get(numeric) || `현재 담당자 [#${numeric}]`;
+  function matchingAgents(queryValue) {
+    const query = normalizeAgentSearch(queryValue);
+    return state.agents
+      .map(agent => ({ agent, score: agentSearchScore(agent, query) }))
+      .filter(item => item.score != null)
+      .sort((a, b) => a.score - b.score || agentName(a.agent).localeCompare(agentName(b.agent), 'ko'))
+      .map(item => item.agent);
   }
 
-  function agentIdFromInput(input) {
-    const value = String(input?.value || '').trim();
-    if (!value) return null;
-    const known = agentIdByInputValue.get(value);
-    if (known) return known;
-    const match = value.match(/\[#(\d+)\]\s*$/);
-    return match ? Number(match[1]) : null;
+  function closeAgentPicker() {
+    const picker = document.querySelector('.fsx-agent-picker');
+    if (agentPickerTarget?.anchor) {
+      agentPickerTarget.anchor.setAttribute('aria-expanded', 'false');
+    }
+    if (picker) picker.hidden = true;
+    agentPickerTarget = null;
+    agentPickerIndex = 0;
+  }
+
+  function positionAgentPicker() {
+    const picker = document.querySelector('.fsx-agent-picker');
+    const anchor = agentPickerTarget?.anchor;
+    if (!picker || picker.hidden || !anchor?.isConnected) return;
+
+    const rect = anchor.getBoundingClientRect();
+    const width = Math.min(340, Math.max(280, window.innerWidth - 24));
+    const left = Math.min(Math.max(12, rect.left), window.innerWidth - width - 12);
+    const below = rect.bottom + 8;
+    const above = rect.top - picker.offsetHeight - 8;
+    const top = below + picker.offsetHeight <= window.innerHeight - 12 ? below : Math.max(12, above);
+    picker.style.width = `${width}px`;
+    picker.style.left = `${left}px`;
+    picker.style.top = `${top}px`;
+  }
+
+  function ensureAgentPicker() {
+    let picker = document.querySelector('.fsx-agent-picker');
+    if (picker) return picker;
+
+    picker = document.createElement('div');
+    picker.className = 'fsx-agent-picker';
+    picker.hidden = true;
+    picker.innerHTML = `
+      <div class="fsx-agent-picker-head">
+        <span class="fsx-agent-search-icon" aria-hidden="true"></span>
+        <input type="search" class="fsx-agent-search" placeholder="이름 또는 이메일 검색"
+          autocomplete="off" spellcheck="false" aria-label="담당자 검색" aria-controls="fsx-agent-results">
+        <button type="button" class="fsx-agent-picker-close" aria-label="담당자 검색 닫기">×</button>
+      </div>
+      <div class="fsx-agent-results" id="fsx-agent-results" role="listbox"></div>
+      <div class="fsx-agent-picker-hint">↑↓ 이동 · Enter 선택 · Esc 닫기</div>`;
+    document.documentElement.appendChild(picker);
+    return picker;
+  }
+
+  function renderAgentPickerResults(queryValue = '') {
+    const picker = ensureAgentPicker();
+    const results = picker.querySelector('.fsx-agent-results');
+    const matched = matchingAgents(queryValue);
+    const visible = matched.slice(0, AGENT_RESULT_LIMIT);
+    agentPickerIndex = Math.max(0, Math.min(agentPickerIndex, Math.max(0, visible.length - 1)));
+
+    if (!visible.length) {
+      results.innerHTML = `
+        <div class="fsx-agent-empty">
+          <strong>검색 결과가 없습니다</strong>
+          <span>이름이나 이메일 일부를 다시 입력해보세요.</span>
+        </div>`;
+      return;
+    }
+
+    results.innerHTML = visible.map((agent, index) => {
+      const selected = Number(agent.id) === Number(agentPickerTarget?.selectedAgentId);
+      const isMe = Number(agent.id) === Number(state.currentAgentId);
+      return `
+        <button type="button" class="fsx-agent-result ${index === agentPickerIndex ? 'active' : ''}"
+          id="fsx-agent-result-${index}" role="option" aria-selected="${selected}"
+          data-agent-id="${agent.id}" data-result-index="${index}">
+          <span class="fsx-agent-avatar" aria-hidden="true">${escapeHtml(agentInitials(agent))}</span>
+          <span class="fsx-agent-result-copy">
+            <span class="fsx-agent-result-name">${escapeHtml(agentName(agent))}${isMe ? '<em>나</em>' : ''}</span>
+            ${agent.email ? `<span class="fsx-agent-result-email">${escapeHtml(agent.email)}</span>` : ''}
+          </span>
+          ${selected ? '<span class="fsx-agent-selected" aria-label="현재 담당자">✓</span>' : ''}
+        </button>`;
+    }).join('');
+
+    if (matched.length > visible.length) {
+      results.insertAdjacentHTML('beforeend', `<div class="fsx-agent-more">${matched.length - visible.length}명 더 있음 · 검색어를 더 입력하세요</div>`);
+    }
+
+    const input = picker.querySelector('.fsx-agent-search');
+    input?.setAttribute('aria-activedescendant', `fsx-agent-result-${agentPickerIndex}`);
+  }
+
+  function openAgentPicker(anchor) {
+    const targetType = anchor.dataset.agentTarget;
+    const taskId = targetType === 'task' ? Number(anchor.dataset.taskId) : null;
+    const selectedAgentId = targetType === 'task' ? taskById(taskId)?.agent_id : bulkAgentId;
+    const picker = ensureAgentPicker();
+    const input = picker.querySelector('.fsx-agent-search');
+
+    if (agentPickerTarget?.anchor && agentPickerTarget.anchor !== anchor) {
+      agentPickerTarget.anchor.setAttribute('aria-expanded', 'false');
+    }
+    agentPickerTarget = { anchor, targetType, taskId, selectedAgentId: Number(selectedAgentId || 0) || null };
+    agentPickerIndex = 0;
+    anchor.setAttribute('aria-expanded', 'true');
+    picker.hidden = false;
+    input.value = '';
+    renderAgentPickerResults();
+    positionAgentPicker();
+    window.requestAnimationFrame(() => input.focus());
+  }
+
+  function selectAgentFromPicker(agentId) {
+    const target = agentPickerTarget;
+    if (!target || !agentForId(agentId)) return;
+    closeAgentPicker();
+    if (target.targetType === 'task') {
+      if (Number(taskById(target.taskId)?.agent_id) !== Number(agentId)) {
+        updateTaskAgent(target.taskId, agentId);
+      }
+      return;
+    }
+    bulkAgentId = Number(agentId);
+    injectInlineControls();
   }
 
   function patchTasks(updatedTasks) {
@@ -259,6 +402,7 @@
     }
     if (Object.prototype.hasOwnProperty.call(data || {}, 'me')) {
       state.currentAgentId = data.me ? Number(data.me) : null;
+      if (!bulkAgentId && state.currentAgentId) bulkAgentId = state.currentAgentId;
     }
     if (data?.settings) state.settings = data.settings;
     if (Array.isArray(data?.tasks)) state.tasks = data.tasks;
@@ -355,14 +499,20 @@
 
   function findTaskRowFromTextNode(node) {
     let el = node.parentElement;
-    for (let depth = 0; el && depth < 9; depth += 1, el = el.parentElement) {
+    const candidates = [];
+    for (let depth = 0; el && depth < 12; depth += 1, el = el.parentElement) {
       if (el.closest('.fsx-inline-controls')) return null;
       const text = el.textContent || '';
       if (!/#?TSK-\d+/i.test(text)) continue;
       const rect = el.getBoundingClientRect();
-      if (rect.width >= 360 && rect.height >= 38 && rect.height <= 150) return el;
+      const ids = new Set(Array.from(text.matchAll(/#?TSK-(\d+)/gi), match => match[1]));
+      if (ids.size === 1 && rect.width >= 360 && rect.height >= 38 && rect.height <= 150) {
+        candidates.push({ row: el, width: rect.width });
+      }
     }
-    return null;
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.width - a.width);
+    return { row: candidates[0].row, anchor: node.parentElement };
   }
 
   function resetTaskRowCache() {
@@ -372,13 +522,15 @@
   function cachedTaskRows() {
     const rows = [];
     const validIds = new Set(state.tasks.map(task => Number(task.id)));
-    taskRowCache.forEach((row, taskId) => {
+    taskRowCache.forEach((cached, taskId) => {
+      const row = cached?.row;
+      const anchor = cached?.anchor;
       const task = taskById(taskId);
-      if (!task || !validIds.has(taskId) || !row?.isConnected) {
+      if (!task || !validIds.has(taskId) || !row?.isConnected || !anchor?.isConnected) {
         taskRowCache.delete(taskId);
         return;
       }
-      rows.push({ row, task });
+      rows.push({ row, anchor, task });
     });
     return rows;
   }
@@ -406,14 +558,18 @@
     );
 
     while (walker.nextNode()) {
-      const row = findTaskRowFromTextNode(walker.currentNode);
-      if (!row) continue;
+      const match = findTaskRowFromTextNode(walker.currentNode);
+      if (!match) continue;
+      const { row, anchor } = match;
       const task = findMatchingTask(row);
       if (!task?.id) continue;
-      rows.set(Number(task.id), { row, task });
+      rows.set(Number(task.id), { row, anchor, task });
     }
 
-    taskRowCache = new Map(Array.from(rows.entries()).map(([taskId, item]) => [taskId, item.row]));
+    taskRowCache = new Map(Array.from(rows.entries()).map(([taskId, item]) => [taskId, {
+      row: item.row,
+      anchor: item.anchor,
+    }]));
     return Array.from(rows.values());
   }
 
@@ -428,14 +584,20 @@
     const busy = state.busyTaskIds.has(String(task.id)) || state.bulkBusy;
     const disabled = busy ? 'disabled' : '';
     const statusValue = Number(task.status) || TASK_STATUS.OPEN;
+    const agent = agentForId(task.agent_id);
+    const agentTitle = agent?.email ? `${agentName(agent)} · ${agent.email}` : agentName(agent);
 
     return `
       <select class="fsx-inline-status fsx-inline-status-${statusValue}" data-task-id="${task.id}" ${disabled} title="작업 상태 변경" aria-label="작업 ${task.id} 상태">
         ${statusOptions(task)}
       </select>
-      <input type="text" class="fsx-inline-agent" data-task-id="${task.id}" list="fsx-agent-options"
-        value="${escapeHtml(displayValueForAgentId(task.agent_id))}" autocomplete="off" ${disabled}
-        placeholder="에이전트 검색" title="에이전트 이름 또는 이메일 검색" aria-label="작업 ${task.id} 담당자 할당">
+      <button type="button" class="fsx-agent-trigger fsx-inline-agent-trigger" data-agent-target="task"
+        data-task-id="${task.id}" aria-haspopup="listbox" aria-expanded="false" ${disabled}
+        title="${escapeHtml(agentTitle || '담당자 검색')}" aria-label="작업 ${task.id} 담당자 변경">
+        <span class="fsx-agent-trigger-avatar" aria-hidden="true">${escapeHtml(agent ? agentInitials(agent) : '+')}</span>
+        <span class="fsx-agent-trigger-label">${escapeHtml(displayNameForAgentId(task.agent_id))}</span>
+        <span class="fsx-agent-trigger-chevron" aria-hidden="true"></span>
+      </button>
       ${busy ? '<span class="fsx-inline-spinner">처리중</span>' : ''}`;
   }
 
@@ -513,6 +675,7 @@
   }
 
   function removeBulkBar() {
+    if (agentPickerTarget?.anchor?.closest?.('.fsx-bulk-bar')) closeAgentPicker();
     document.querySelector('.fsx-bulk-bar')?.remove();
   }
 
@@ -522,14 +685,11 @@
       return;
     }
 
-    const anchor = rows[0].row;
     let bar = document.querySelector('.fsx-bulk-bar');
     if (!bar) {
       bar = document.createElement('div');
       bar.className = 'fsx-bulk-bar';
-    }
-    if (bar.parentElement !== anchor.parentElement || bar.nextElementSibling !== anchor) {
-      anchor.parentElement.insertBefore(bar, anchor);
+      document.documentElement.appendChild(bar);
     }
 
     const stats = selectionStats();
@@ -547,11 +707,11 @@
       state.bulkBusy ? 'busy' : 'idle',
       selectedTaskIdsKey,
       state.currentAgentId || '',
+      bulkAgentId || '',
       agentsVersion,
     ].join('::');
     if (bar.dataset.renderKey === renderKey) return;
 
-    const prevAgentValue = bar.querySelector('.fsx-bulk-agent')?.value || '';
     bar.dataset.renderKey = renderKey;
     bar.classList.toggle('fsx-bulk-bar-active', count > 0);
     bar.classList.toggle('fsx-bulk-bar-busy', state.bulkBusy);
@@ -559,43 +719,44 @@
     const disabled = state.bulkBusy ? 'disabled' : '';
     const selectedDisabled = count && !state.bulkBusy ? '' : 'disabled';
     const allSelected = total > 0 && count >= total;
-    const clearDisabled = count && !state.bulkBusy ? '' : 'disabled';
     const openSelectDisabled = stats.open && !state.bulkBusy ? '' : 'disabled';
     const unassignedSelectDisabled = stats.unassigned && !state.bulkBusy ? '' : 'disabled';
     const assignUnassignedDisabled = stats.unassigned && !state.bulkBusy ? '' : 'disabled';
-    const countLabel = count ? `${count}/${total} 선택` : `작업 ${total}개`;
+    const countLabel = count ? `${count}개 선택` : `작업 ${total}개`;
     const detailLabel = count
       ? `선택: 대기 ${stats.selectedOpen} · 완료 ${stats.selectedCompleted} · 미할당 ${stats.selectedUnassigned}`
       : `대기 ${stats.open} · 완료 ${stats.completed} · 미할당 ${stats.unassigned}`;
-    const defaultAgentValue = prevAgentValue || displayValueForAgentId(state.currentAgentId);
+    const bulkAgent = agentForId(bulkAgentId);
+    const runActions = count ? `
+      <div class="fsx-bulk-actions fsx-bulk-run-actions" aria-label="선택 작업 실행">
+        <button type="button" class="fsx-agent-trigger fsx-bulk-agent-trigger" data-agent-target="bulk"
+          aria-haspopup="listbox" aria-expanded="false" ${disabled}
+          title="${escapeHtml(bulkAgent?.email ? `${agentName(bulkAgent)} · ${bulkAgent.email}` : '일괄 담당자 검색')}">
+          <span class="fsx-agent-trigger-avatar" aria-hidden="true">${escapeHtml(bulkAgent ? agentInitials(bulkAgent) : '+')}</span>
+          <span class="fsx-agent-trigger-label">${escapeHtml(displayNameForAgentId(bulkAgentId))}</span>
+          <span class="fsx-agent-trigger-chevron" aria-hidden="true"></span>
+        </button>
+        <button type="button" class="fsx-bulk-btn primary" data-action="bulk-complete" ${selectedDisabled}>완료</button>
+        <button type="button" class="fsx-bulk-btn" data-action="bulk-open" ${selectedDisabled}>대기</button>
+        ${unassigned ? `<button type="button" class="fsx-bulk-btn" data-action="bulk-assign-unassigned" ${assignUnassignedDisabled}>미할당 ${unassigned}개</button>` : ''}
+        <button type="button" class="fsx-bulk-btn ghost muted" data-action="clear-selection" ${disabled}>해제</button>
+        ${state.bulkBusy ? '<span class="fsx-inline-spinner">처리중…</span>' : ''}
+      </div>` : '';
 
     bar.innerHTML = `
       <div class="fsx-bulk-summary">
-        <span class="fsx-bulk-title">작업 컨트롤</span>
+        <span class="fsx-bulk-title" aria-hidden="true">✓</span>
         <span class="fsx-bulk-count ${count ? 'active' : ''}">${countLabel}</span>
         <span class="fsx-bulk-meta">${detailLabel}</span>
       </div>
       <div class="fsx-bulk-actions fsx-bulk-pick-actions" aria-label="작업 선택">
         <button type="button" class="fsx-bulk-btn ghost" data-action="${allSelected ? 'clear-selection' : 'select-all'}" ${disabled}>
-          ${allSelected ? '전체 해제' : '전체 선택'}
+          ${allSelected ? '전체 해제' : '전체'}
         </button>
-        <button type="button" class="fsx-bulk-btn ghost" data-action="select-open" ${openSelectDisabled}>대기만 선택</button>
-        <button type="button" class="fsx-bulk-btn ghost" data-action="select-unassigned" ${unassignedSelectDisabled}>미할당 선택</button>
-        <button type="button" class="fsx-bulk-btn ghost muted" data-action="clear-selection" ${clearDisabled}>선택 비우기</button>
+        ${stats.open ? `<button type="button" class="fsx-bulk-btn ghost" data-action="select-open" ${openSelectDisabled}>대기 ${stats.open}</button>` : ''}
+        ${stats.unassigned ? `<button type="button" class="fsx-bulk-btn ghost" data-action="select-unassigned" ${unassignedSelectDisabled}>미할당 ${stats.unassigned}</button>` : ''}
       </div>
-      <div class="fsx-bulk-actions fsx-bulk-run-actions" aria-label="선택 작업 실행">
-        <input type="text" class="fsx-bulk-agent" list="fsx-agent-options" value="${escapeHtml(defaultAgentValue)}"
-          autocomplete="off" ${disabled} placeholder="에이전트 검색"
-          title="완료 처리/대기 전환 시 함께 할당할 에이전트" aria-label="완료 처리/대기 전환 시 함께 할당할 에이전트">
-        <button type="button" class="fsx-bulk-btn primary" data-action="bulk-complete" ${selectedDisabled}
-          title="선택한 작업을 완료 처리하고, 에이전트를 골랐다면 함께 할당합니다">완료 처리</button>
-        <button type="button" class="fsx-bulk-btn" data-action="bulk-open" ${selectedDisabled}
-          title="선택한 작업을 대기 상태로 바꾸고, 에이전트를 골랐다면 함께 할당합니다">대기 전환</button>
-        <span class="fsx-bulk-divider"></span>
-        <button type="button" class="fsx-bulk-btn" data-action="bulk-assign-unassigned" ${assignUnassignedDisabled}
-          title="담당 에이전트가 없는 작업에만 할당합니다">미할당만 적용${unassigned ? ` (${unassigned})` : ''}</button>
-        ${state.bulkBusy ? '<span class="fsx-inline-spinner">처리중…</span>' : ''}
-      </div>`;
+      ${runActions}`;
 
   }
 
@@ -623,22 +784,23 @@
       return;
     }
 
-    ensureAgentDatalist();
     const rows = findTaskRows({ force: forceScan });
     renderBulkBar(rows);
 
-    rows.forEach(({ row, task }) => {
+    rows.forEach(({ row, anchor, task }) => {
       const selected = state.selectedTaskIds.has(Number(task.id));
       row.classList.add('fsx-inline-row');
       row.classList.toggle('fsx-inline-selected', selected);
       row.classList.toggle('fsx-inline-completed', !!task.completed);
       row.dataset.fsxTaskId = String(task.id);
       row.title = row.title || '클릭하거나 드래그하면 작업을 선택/해제할 수 있습니다';
-      let controls = row.querySelector(':scope > .fsx-inline-controls');
+      let controls = row.querySelector(`.fsx-inline-controls[data-task-id="${task.id}"]`);
       if (!controls) {
-        controls = document.createElement('div');
+        controls = document.createElement('span');
         controls.className = 'fsx-inline-controls';
-        row.appendChild(controls);
+      }
+      if (anchor?.parentElement && controls.previousElementSibling !== anchor) {
+        anchor.insertAdjacentElement('afterend', controls);
       }
       controls.classList.toggle('fsx-inline-controls-selected', selected);
       controls.dataset.taskId = String(task.id);
@@ -761,12 +923,7 @@
       return;
     }
     if (action === 'bulk-complete' || action === 'bulk-open') {
-      const agentInput = document.querySelector('.fsx-bulk-agent');
-      const agentId = agentIdFromInput(agentInput);
-      if (agentInput?.value.trim() && !agentId) {
-        showToast('에이전트 검색 결과에서 정확한 항목을 선택해주세요.', 'warning');
-        return;
-      }
+      const agentId = Number(bulkAgentId || 0) || null;
       const status = action === 'bulk-complete' ? TASK_STATUS.COMPLETED : TASK_STATUS.OPEN;
       const updates = { status };
       const baseLabel = action === 'bulk-complete' ? '완료 처리' : '대기 상태로 변경';
@@ -780,9 +937,9 @@
       return;
     }
     if (action === 'bulk-assign-unassigned') {
-      const agentId = agentIdFromInput(document.querySelector('.fsx-bulk-agent'));
+      const agentId = Number(bulkAgentId || 0) || null;
       if (!agentId) {
-        showToast('검색 결과에서 일괄 할당할 에이전트를 선택해주세요.', 'warning');
+        showToast('먼저 일괄 할당할 담당자를 선택해주세요.', 'warning');
         return;
       }
       const agent = state.agents.find(item => Number(item.id) === agentId);
@@ -799,19 +956,40 @@
     const statusSelect = event.target.closest('.fsx-inline-status');
     if (statusSelect) {
       updateTaskStatus(statusSelect.dataset.taskId, statusSelect.value);
+    }
+  }
+
+  function handleInput(event) {
+    if (!event.target.matches('.fsx-agent-search')) return;
+    agentPickerIndex = 0;
+    renderAgentPickerResults(event.target.value);
+  }
+
+  function handleKeyDown(event) {
+    if (!event.target.matches('.fsx-agent-search')) return;
+    const picker = event.target.closest('.fsx-agent-picker');
+    const resultButtons = Array.from(picker?.querySelectorAll('.fsx-agent-result') || []);
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      const anchor = agentPickerTarget?.anchor;
+      closeAgentPicker();
+      anchor?.focus();
       return;
     }
-
-    const agentInput = event.target.closest('.fsx-inline-agent');
-    if (agentInput) {
-      const task = taskById(agentInput.dataset.taskId);
-      const agentId = agentIdFromInput(agentInput);
-      if (!agentId) {
-        agentInput.value = displayValueForAgentId(task?.agent_id);
-        showToast('에이전트 검색 결과에서 정확한 항목을 선택해주세요.', 'warning');
-        return;
-      }
-      if (Number(task?.agent_id) !== agentId) updateTaskAgent(agentInput.dataset.taskId, agentId);
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (!resultButtons.length) return;
+      event.preventDefault();
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      agentPickerIndex = (agentPickerIndex + delta + resultButtons.length) % resultButtons.length;
+      renderAgentPickerResults(event.target.value);
+      picker?.querySelector('.fsx-agent-result.active')?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (event.key === 'Enter' && resultButtons.length) {
+      event.preventDefault();
+      const agentId = Number(resultButtons[agentPickerIndex]?.dataset.agentId || 0);
+      if (agentId) selectAgentFromPicker(agentId);
     }
   }
 
@@ -875,6 +1053,34 @@
       return;
     }
 
+    const agentResult = event.target.closest('.fsx-agent-result');
+    if (agentResult) {
+      event.stopPropagation();
+      event.preventDefault();
+      selectAgentFromPicker(Number(agentResult.dataset.agentId));
+      return;
+    }
+
+    if (event.target.closest('.fsx-agent-picker-close')) {
+      event.stopPropagation();
+      event.preventDefault();
+      const anchor = agentPickerTarget?.anchor;
+      closeAgentPicker();
+      anchor?.focus();
+      return;
+    }
+
+    const agentTrigger = event.target.closest('.fsx-agent-trigger');
+    if (agentTrigger) {
+      event.stopPropagation();
+      event.preventDefault();
+      if (agentPickerTarget?.anchor === agentTrigger) closeAgentPicker();
+      else openAgentPicker(agentTrigger);
+      return;
+    }
+
+    if (agentPickerTarget && !event.target.closest('.fsx-agent-picker')) closeAgentPicker();
+
     const bulkButton = event.target.closest('.fsx-bulk-bar [data-action]');
     if (bulkButton) {
       event.stopPropagation();
@@ -898,7 +1104,13 @@
     injectInlineControls();
   }
 
+  function handleScroll(event) {
+    if (!agentPickerTarget || event.target?.closest?.('.fsx-agent-results')) return;
+    closeAgentPicker();
+  }
+
   function clearInjectedControls() {
+    closeAgentPicker();
     document.querySelectorAll('.fsx-inline-controls').forEach(controls => controls.remove());
     document.querySelectorAll('.fsx-inline-row').forEach(row => {
       row.classList.remove('fsx-inline-row', 'fsx-inline-selected', 'fsx-inline-completed');
@@ -924,6 +1136,7 @@
     state.tasks = [];
     state.agents = [];
     state.currentAgentId = null;
+    bulkAgentId = null;
     rebuildAgentLookup();
     clearSelection();
     clearInjectedControls();
@@ -972,12 +1185,14 @@
     });
 
     if (!forceScan) {
-      for (const row of taskRowCache.values()) {
-        if (!row.isConnected) {
+      for (const [taskId, cached] of taskRowCache.entries()) {
+        const row = cached?.row;
+        const anchor = cached?.anchor;
+        if (!row?.isConnected || !anchor?.isConnected) {
           forceScan = true;
           break;
         }
-        if (!row.querySelector(':scope > .fsx-inline-controls')) repairControls = true;
+        if (!row.querySelector(`.fsx-inline-controls[data-task-id="${taskId}"]`)) repairControls = true;
       }
     }
 
@@ -996,11 +1211,15 @@
   }
 
   document.addEventListener('change', handleChange, true);
+  document.addEventListener('input', handleInput, true);
+  document.addEventListener('keydown', handleKeyDown, true);
   document.addEventListener('click', handleClick, true);
   document.addEventListener('pointerdown', handlePointerDown, true);
   document.addEventListener('pointermove', handlePointerMove, true);
   document.addEventListener('pointerup', handlePointerEnd, true);
   document.addEventListener('pointercancel', handlePointerEnd, true);
+  document.addEventListener('scroll', handleScroll, true);
+  window.addEventListener('resize', positionAgentPicker);
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
     if (!changes.fsDomain && !changes.fsApiKey) return;
@@ -1008,6 +1227,7 @@
     state.tasks = [];
     state.agents = [];
     state.currentAgentId = null;
+    bulkAgentId = null;
     rebuildAgentLookup();
     clearSelection();
     clearInjectedControls();
