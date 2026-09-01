@@ -10,6 +10,8 @@ const TASK_STATUS = {
 };
 
 const AGENT_CACHE_TTL_MS = 10 * 60 * 1000;
+const AGENT_SESSION_CACHE_KEY = 'fsxAgentCacheV1';
+const CURRENT_AGENT_SESSION_CACHE_KEY = 'fsxCurrentAgentCacheV1';
 const BULK_UPDATE_MAX_TASKS = 50;
 const BULK_UPDATE_DELAY_MS = 150;
 let agentCache = { domain: '', at: 0, agents: [] };
@@ -93,6 +95,44 @@ function writeStorage(values) {
 
 function removeStorage(keys) {
   return new Promise(resolve => chrome.storage.local.remove(keys, resolve));
+}
+
+function readSessionStorage(defaults) {
+  return new Promise(resolve => {
+    if (!chrome.storage.session) {
+      resolve(defaults);
+      return;
+    }
+    chrome.storage.session.get(defaults, values => {
+      resolve(chrome.runtime.lastError ? defaults : values);
+    });
+  });
+}
+
+function writeSessionStorage(values) {
+  return new Promise(resolve => {
+    if (!chrome.storage.session) {
+      resolve();
+      return;
+    }
+    chrome.storage.session.set(values, () => {
+      void chrome.runtime.lastError;
+      resolve();
+    });
+  });
+}
+
+function removeSessionStorage(keys) {
+  return new Promise(resolve => {
+    if (!chrome.storage.session) {
+      resolve();
+      return;
+    }
+    chrome.storage.session.remove(keys, () => {
+      void chrome.runtime.lastError;
+      resolve();
+    });
+  });
 }
 
 function normalizeDomain(value) {
@@ -390,6 +430,19 @@ async function fetchAgents(settings, { force = false } = {}) {
     return agentCache.agents;
   }
 
+  if (!force) {
+    const stored = (await readSessionStorage({ [AGENT_SESSION_CACHE_KEY]: null }))[AGENT_SESSION_CACHE_KEY];
+    if (
+      stored?.domain === settings.fsDomain &&
+      Array.isArray(stored.agents) &&
+      stored.agents.length &&
+      Date.now() - Number(stored.at || 0) < AGENT_CACHE_TTL_MS
+    ) {
+      agentCache = stored;
+      return agentCache.agents;
+    }
+  }
+
   const all = [];
   let page = 1;
   while (page <= 20) {
@@ -405,6 +458,7 @@ async function fetchAgents(settings, { force = false } = {}) {
     at: Date.now(),
     agents: all.sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')),
   };
+  await writeSessionStorage({ [AGENT_SESSION_CACHE_KEY]: agentCache });
   return agentCache.agents;
 }
 
@@ -419,9 +473,35 @@ async function fetchCurrentAgent(settings, { force = false } = {}) {
     return currentAgentCache.agent;
   }
 
+  if (!force) {
+    const stored = (await readSessionStorage({
+      [CURRENT_AGENT_SESSION_CACHE_KEY]: null,
+    }))[CURRENT_AGENT_SESSION_CACHE_KEY];
+    if (
+      stored?.domain === settings.fsDomain &&
+      stored.agent &&
+      Date.now() - Number(stored.at || 0) < AGENT_CACHE_TTL_MS
+    ) {
+      currentAgentCache = {
+        domain: settings.fsDomain,
+        apiKey: settings.fsApiKey,
+        at: Number(stored.at),
+        agent: stored.agent,
+      };
+      return currentAgentCache.agent;
+    }
+  }
+
   const data = await freshserviceFetch(settings, '/agents/me');
   const agent = normalizeAgent(data?.agent || data);
   currentAgentCache = { domain: settings.fsDomain, apiKey: settings.fsApiKey, at: Date.now(), agent };
+  await writeSessionStorage({
+    [CURRENT_AGENT_SESSION_CACHE_KEY]: {
+      domain: settings.fsDomain,
+      at: currentAgentCache.at,
+      agent,
+    },
+  });
   return agent;
 }
 
@@ -474,24 +554,30 @@ async function updateTicketTaskWithCandidates(settings, ticketId, taskId, candid
   throw lastError || new FreshserviceError('작업 업데이트에 실패했습니다.', 400);
 }
 
-async function buildTasksPayload(ticketId) {
+async function buildTasksPayload(ticketId, { includeTicketDetails = true } = {}) {
   const settings = await getSettings({ requireConfigured: true });
-  const [ticket, tasks, agents, currentAgent] = await Promise.all([
-    fetchTicket(settings, ticketId),
+  const [tasks, agents, currentAgent] = await Promise.all([
     fetchTicketTasks(settings, ticketId),
     fetchAgents(settings).catch(() => []),
     fetchCurrentAgent(settings).catch(() => null),
   ]);
-  const suggested = inferTaskScenario(ticket);
 
-  return {
+  const payload = {
     agents,
     me: currentAgent?.id || null,
     settings: safeSettings(settings),
-    ticket: normalizeTicket(ticket),
-    ticket_url: ticketWebUrl(settings, ticketId),
     tasks,
     progress: progressFor(tasks),
+  };
+
+  if (!includeTicketDetails) return payload;
+
+  const ticket = await fetchTicket(settings, ticketId);
+  const suggested = inferTaskScenario(ticket);
+  return {
+    ...payload,
+    ticket: normalizeTicket(ticket),
+    ticket_url: ticketWebUrl(settings, ticketId),
     scenarios: serializeTemplates(),
     suggested_scenario_id: suggested?.id || null,
     suggested_scenario: suggested ? serializeTemplate(suggested) : null,
@@ -587,10 +673,15 @@ async function updateTask(ticketId, taskId, updates) {
   const settings = await getSettings({ requireConfigured: true });
   const existing = normalizeFreshserviceTask(await fetchTicketTask(settings, ticketId, taskId));
 
-  await updateTicketTaskWithCandidates(settings, ticketId, taskId, buildUpdateCandidates(existing, updates));
+  const updated = await updateTicketTaskWithCandidates(
+    settings,
+    ticketId,
+    taskId,
+    buildUpdateCandidates(existing, updates)
+  );
 
   return {
-    ...(await buildTasksPayload(ticketId)),
+    task: normalizeFreshserviceTask({ ...existing, ...updated }),
     updated_task_id: taskId,
   };
 }
@@ -612,6 +703,7 @@ async function bulkUpdateTasks(ticketId, taskIds, updates) {
   const tasks = await fetchTicketTasks(settings, ticketId);
   const taskMap = new Map(tasks.map(task => [Number(task.id), task]));
   const failures = [];
+  const updatedTasks = [];
   let succeeded = 0;
 
   for (let i = 0; i < ids.length; i += 1) {
@@ -619,7 +711,13 @@ async function bulkUpdateTasks(ticketId, taskIds, updates) {
     const existing = taskMap.get(taskId);
     try {
       if (!existing) throw new FreshserviceError('작업을 찾을 수 없습니다.', 404);
-      await updateTicketTaskWithCandidates(settings, ticketId, taskId, buildUpdateCandidates(existing, updates));
+      const updated = await updateTicketTaskWithCandidates(
+        settings,
+        ticketId,
+        taskId,
+        buildUpdateCandidates(existing, updates)
+      );
+      updatedTasks.push(normalizeFreshserviceTask({ ...existing, ...updated }));
       succeeded += 1;
     } catch (error) {
       failures.push({
@@ -632,7 +730,7 @@ async function bulkUpdateTasks(ticketId, taskIds, updates) {
   }
 
   return {
-    ...(await buildTasksPayload(ticketId)),
+    updated_tasks: updatedTasks,
     bulk: {
       requested: ids.length,
       succeeded,
@@ -664,6 +762,9 @@ async function handleMessage(message) {
     };
     await writeStorage(settings);
     await removeStorage('operatorName');
+    agentCache = { domain: '', at: 0, agents: [] };
+    currentAgentCache = { domain: '', apiKey: '', at: 0, agent: null };
+    await removeSessionStorage([AGENT_SESSION_CACHE_KEY, CURRENT_AGENT_SESSION_CACHE_KEY]);
     return { settings: safeSettings(settings) };
   }
   if (type === 'TEST_SETTINGS') {
@@ -679,7 +780,7 @@ async function handleMessage(message) {
     return { scenarios: serializeTemplates() };
   }
   if (type === 'GET_TICKET_TASKS') {
-    return buildTasksPayload(Number(message.ticketId));
+    return buildTasksPayload(Number(message.ticketId), { includeTicketDetails: false });
   }
   if (type === 'APPLY_SCENARIO') {
     return applyScenario(Number(message.ticketId), message.scenarioId);

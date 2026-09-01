@@ -53,8 +53,8 @@ Your API key is not sent to any third-party server. It is stored only in this br
 
 1. Open a Freshservice ticket detail page, such as `/a/tickets/{ticketId}`.
 2. Open the ticket's task tab or task section.
-3. Use the inline status checkbox to switch a task between completed and open.
-4. Use the inline agent dropdown to assign a task to an agent.
+3. Use the inline status dropdown to switch a task between open, in progress, and completed.
+4. Search for an agent by name or email and choose an exact suggestion to assign the task. All task rows share one lightweight suggestion list.
 5. Result messages appear as toast notifications in the upper-right area of the page.
 
 ### Bulk Updates

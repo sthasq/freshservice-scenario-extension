@@ -1,4 +1,7 @@
 (function () {
+  if (globalThis.__FSX_CONTENT_INITIALIZED__) return;
+  globalThis.__FSX_CONTENT_INITIALIZED__ = true;
+
   const TASK_STATUS = {
     OPEN: 1,
     IN_PROGRESS: 2,
@@ -26,13 +29,26 @@
   };
 
   const BULK_CONFIRM_THRESHOLD = 5;
+  const DOM_UPDATE_DEBOUNCE_MS = 120;
   const DRAG_SELECT_THRESHOLD_PX = 6;
   const DRAG_SAMPLE_STEP_PX = 12;
+  const EXTENSION_ROOT_SELECTOR = '.fsx-inline-controls,.fsx-bulk-bar,.fsx-inline-toast,.fsx-agent-datalist';
+  const THEME_SYNC_THROTTLE_MS = 5000;
+  const URL_CHECK_INTERVAL_MS = 1000;
 
+  let agentIdByInputValue = new Map();
+  let agentInputValueById = new Map();
+  let agentsVersion = 0;
   let contextLoadPromise = null;
   let contextInvalidated = false;
   let dragSelect = null;
+  let forceRowScanPending = false;
+  let lastThemeSyncAt = 0;
+  let lastUrl = location.href;
+  let renderFrameId = null;
+  let renderTimerId = null;
   let suppressClickUntil = 0;
+  let taskRowCache = new Map();
   let toastTimer = null;
   let watchIntervalId = null;
   let pageObserver = null;
@@ -72,6 +88,12 @@
     if (pageObserver) {
       pageObserver.disconnect();
       pageObserver = null;
+    }
+    window.clearTimeout(renderTimerId);
+    renderTimerId = null;
+    if (renderFrameId) {
+      window.cancelAnimationFrame(renderFrameId);
+      renderFrameId = null;
     }
     showToast(CONTEXT_INVALIDATED_MESSAGE, 'error');
   }
@@ -149,7 +171,10 @@
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches || false;
   }
 
-  function syncThemeClass() {
+  function syncThemeClass({ force = false } = {}) {
+    const now = Date.now();
+    if (!force && now - lastThemeSyncAt < THEME_SYNC_THROTTLE_MS) return;
+    lastThemeSyncAt = now;
     document.documentElement.classList.toggle('fsx-dark-mode', detectDarkPage());
   }
 
@@ -174,11 +199,71 @@
     }, TOAST_DURATION_MS[type] || TOAST_DURATION_MS.success);
   }
 
+  function agentInputValue(agent) {
+    const label = agent?.email ? `${agent.name} (${agent.email})` : agent?.name || `Agent ${agent?.id || ''}`;
+    return `${label} [#${agent?.id}]`;
+  }
+
+  function rebuildAgentLookup() {
+    agentIdByInputValue = new Map();
+    agentInputValueById = new Map();
+    state.agents.forEach(agent => {
+      const value = agentInputValue(agent);
+      agentIdByInputValue.set(value, Number(agent.id));
+      agentInputValueById.set(Number(agent.id), value);
+    });
+    agentsVersion += 1;
+    ensureAgentDatalist();
+  }
+
+  function ensureAgentDatalist() {
+    let list = document.getElementById('fsx-agent-options');
+    if (!list) {
+      list = document.createElement('datalist');
+      list.id = 'fsx-agent-options';
+      list.className = 'fsx-agent-datalist';
+      document.documentElement.appendChild(list);
+    }
+    if (list.dataset.agentsVersion === String(agentsVersion)) return;
+    list.dataset.agentsVersion = String(agentsVersion);
+    list.innerHTML = state.agents
+      .map(agent => `<option value="${escapeHtml(agentInputValue(agent))}"></option>`)
+      .join('');
+  }
+
+  function displayValueForAgentId(agentId) {
+    const numeric = Number(agentId || 0);
+    if (!numeric) return '';
+    return agentInputValueById.get(numeric) || `현재 담당자 [#${numeric}]`;
+  }
+
+  function agentIdFromInput(input) {
+    const value = String(input?.value || '').trim();
+    if (!value) return null;
+    const known = agentIdByInputValue.get(value);
+    if (known) return known;
+    const match = value.match(/\[#(\d+)\]\s*$/);
+    return match ? Number(match[1]) : null;
+  }
+
+  function patchTasks(updatedTasks) {
+    if (!Array.isArray(updatedTasks) || !updatedTasks.length) return;
+    const updates = new Map(updatedTasks.map(task => [Number(task.id), task]));
+    state.tasks = state.tasks.map(task => updates.get(Number(task.id)) || task);
+  }
+
   function applyContext(data) {
-    state.agents = data?.agents || state.agents || [];
-    state.currentAgentId = data?.me ? Number(data.me) : state.currentAgentId;
-    state.settings = data?.settings || state.settings;
-    state.tasks = data?.tasks || state.tasks || [];
+    if (Array.isArray(data?.agents)) {
+      state.agents = data.agents;
+      rebuildAgentLookup();
+    }
+    if (Object.prototype.hasOwnProperty.call(data || {}, 'me')) {
+      state.currentAgentId = data.me ? Number(data.me) : null;
+    }
+    if (data?.settings) state.settings = data.settings;
+    if (Array.isArray(data?.tasks)) state.tasks = data.tasks;
+    if (data?.task) patchTasks([data.task]);
+    if (Array.isArray(data?.updated_tasks)) patchTasks(data.updated_tasks);
     state.loadedTicketId = state.ticketId;
 
     const validIds = new Set(state.tasks.map(task => Number(task.id)));
@@ -216,34 +301,28 @@
     };
   }
 
-  async function loadSettings() {
-    const response = await sendMessage('GET_SETTINGS_STATUS');
-    if (!response.ok) throw new Error(response.message || '설정을 불러오지 못했습니다.');
-    state.settings = response.data?.settings || state.settings;
-    return state.settings;
-  }
-
   async function loadContext({ force = false } = {}) {
-    syncThemeClass();
+    syncThemeClass({ force });
     state.ticketId = extractTicketId();
     if (!state.ticketId) return;
     if (!force && state.loadedTicketId === state.ticketId && state.tasks.length) {
-      injectInlineControls();
+      scheduleInlineControls();
       return;
     }
     if (contextLoadPromise) return contextLoadPromise;
 
     contextLoadPromise = (async () => {
       try {
-        await loadSettings();
-        if (!state.settings.configured) {
-          showToast('확장 설정에서 FS_DOMAIN, FS_API_KEY를 저장해주세요.', 'warning');
-          return;
-        }
         const response = await sendMessage('GET_TICKET_TASKS', { ticketId: state.ticketId });
-        if (!response.ok) throw new Error(response.message || '작업 목록을 불러오지 못했습니다.');
+        if (!response.ok) {
+          if (response.status === 412 || response.code === 'SETTINGS_REQUIRED') {
+            showToast(response.message || '확장 설정에서 FS_DOMAIN, FS_API_KEY를 저장해주세요.', 'warning');
+            return;
+          }
+          throw new Error(response.message || '작업 목록을 불러오지 못했습니다.');
+        }
         applyContext(response.data);
-        injectInlineControls();
+        scheduleInlineControls({ forceScan: true, delay: 0 });
       } catch (error) {
         state.error = error.message;
         showToast(error.message, 'error');
@@ -286,15 +365,41 @@
     return null;
   }
 
-  function findTaskRows() {
+  function resetTaskRowCache() {
+    taskRowCache = new Map();
+  }
+
+  function cachedTaskRows() {
+    const rows = [];
+    const validIds = new Set(state.tasks.map(task => Number(task.id)));
+    taskRowCache.forEach((row, taskId) => {
+      const task = taskById(taskId);
+      if (!task || !validIds.has(taskId) || !row?.isConnected) {
+        taskRowCache.delete(taskId);
+        return;
+      }
+      rows.push({ row, task });
+    });
+    return rows;
+  }
+
+  function findTaskRows({ force = false } = {}) {
+    if (!force) {
+      const cached = cachedTaskRows();
+      if (cached.length) return cached;
+    }
+
     const rows = new Map();
     const walker = document.createTreeWalker(
       document.body,
-      NodeFilter.SHOW_TEXT,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
       {
         acceptNode(node) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            if (node.matches?.(EXTENSION_ROOT_SELECTOR)) return NodeFilter.FILTER_REJECT;
+            return NodeFilter.FILTER_SKIP;
+          }
           if (!/#?TSK-\d+/i.test(node.nodeValue || '')) return NodeFilter.FILTER_REJECT;
-          if (node.parentElement?.closest('.fsx-inline-controls,.fsx-inline-toast')) return NodeFilter.FILTER_REJECT;
           return NodeFilter.FILTER_ACCEPT;
         },
       }
@@ -308,25 +413,8 @@
       rows.set(Number(task.id), { row, task });
     }
 
+    taskRowCache = new Map(Array.from(rows.entries()).map(([taskId, item]) => [taskId, item.row]));
     return Array.from(rows.values());
-  }
-
-  function agentOptions(task) {
-    const selectedId = Number(task.agent_id || 0);
-    const options = ['<option value="">에이전트 할당</option>'];
-    let hasSelected = !selectedId;
-
-    state.agents.forEach(agent => {
-      const selected = Number(agent.id) === selectedId ? 'selected' : '';
-      if (selected) hasSelected = true;
-      const label = agent.email ? `${agent.name} (${agent.email})` : agent.name;
-      options.push(`<option value="${agent.id}" ${selected}>${escapeHtml(label)}</option>`);
-    });
-
-    if (selectedId && !hasSelected) {
-      options.push(`<option value="${selectedId}" selected>현재 담당자 #${selectedId}</option>`);
-    }
-    return options.join('');
   }
 
   function statusOptions(task) {
@@ -345,9 +433,9 @@
       <select class="fsx-inline-status fsx-inline-status-${statusValue}" data-task-id="${task.id}" ${disabled} title="작업 상태 변경" aria-label="작업 ${task.id} 상태">
         ${statusOptions(task)}
       </select>
-      <select class="fsx-inline-agent" data-task-id="${task.id}" ${disabled} title="에이전트 할당" aria-label="작업 ${task.id} 담당자 할당">
-        ${agentOptions(task)}
-      </select>
+      <input type="text" class="fsx-inline-agent" data-task-id="${task.id}" list="fsx-agent-options"
+        value="${escapeHtml(displayValueForAgentId(task.agent_id))}" autocomplete="off" ${disabled}
+        placeholder="에이전트 검색" title="에이전트 이름 또는 이메일 검색" aria-label="작업 ${task.id} 담당자 할당">
       ${busy ? '<span class="fsx-inline-spinner">처리중</span>' : ''}`;
   }
 
@@ -356,7 +444,7 @@
       task.id,
       Number(task.status) || 0,
       task.agent_id || '',
-      state.agents.map(agent => `${agent.id}:${agent.name}:${agent.email}`).join('|'),
+      agentsVersion,
       state.busyTaskIds.has(String(task.id)) ? 'busy' : 'idle',
       state.selectedTaskIds.has(Number(task.id)) ? 'sel' : 'unsel',
       state.bulkBusy ? 'bulk' : 'ready',
@@ -397,7 +485,7 @@
     dragSelect.touched.add(taskId);
     if (setTaskSelected(taskId, dragSelect.shouldSelect)) {
       dragSelect.changedCount += 1;
-      injectInlineControls();
+      scheduleInlineControls({ delay: 0 });
     }
   }
 
@@ -459,7 +547,7 @@
       state.bulkBusy ? 'busy' : 'idle',
       selectedTaskIdsKey,
       state.currentAgentId || '',
-      state.agents.map(agent => `${agent.id}:${agent.name}`).join('|'),
+      agentsVersion,
     ].join('::');
     if (bar.dataset.renderKey === renderKey) return;
 
@@ -479,19 +567,7 @@
     const detailLabel = count
       ? `선택: 대기 ${stats.selectedOpen} · 완료 ${stats.selectedCompleted} · 미할당 ${stats.selectedUnassigned}`
       : `대기 ${stats.open} · 완료 ${stats.completed} · 미할당 ${stats.unassigned}`;
-    const selfAgent = state.currentAgentId
-      ? state.agents.find(agent => Number(agent.id) === Number(state.currentAgentId))
-      : null;
-    const otherAgents = state.agents.filter(agent => !selfAgent || Number(agent.id) !== Number(selfAgent.id));
-    const agentOptionsHtml = ['<option value="">에이전트 선택</option>']
-      .concat(selfAgent ? [
-        `<option value="${selfAgent.id}" selected>${escapeHtml(selfAgent.name)} (나)</option>`,
-      ] : [])
-      .concat(otherAgents.map(agent => {
-        const label = agent.email ? `${agent.name} (${agent.email})` : agent.name;
-        return `<option value="${agent.id}">${escapeHtml(label)}</option>`;
-      }))
-      .join('');
+    const defaultAgentValue = prevAgentValue || displayValueForAgentId(state.currentAgentId);
 
     bar.innerHTML = `
       <div class="fsx-bulk-summary">
@@ -508,7 +584,9 @@
         <button type="button" class="fsx-bulk-btn ghost muted" data-action="clear-selection" ${clearDisabled}>선택 비우기</button>
       </div>
       <div class="fsx-bulk-actions fsx-bulk-run-actions" aria-label="선택 작업 실행">
-        <select class="fsx-bulk-agent" ${disabled} title="완료 처리/대기 전환 시 함께 할당할 에이전트" aria-label="완료 처리/대기 전환 시 함께 할당할 에이전트">${agentOptionsHtml}</select>
+        <input type="text" class="fsx-bulk-agent" list="fsx-agent-options" value="${escapeHtml(defaultAgentValue)}"
+          autocomplete="off" ${disabled} placeholder="에이전트 검색"
+          title="완료 처리/대기 전환 시 함께 할당할 에이전트" aria-label="완료 처리/대기 전환 시 함께 할당할 에이전트">
         <button type="button" class="fsx-bulk-btn primary" data-action="bulk-complete" ${selectedDisabled}
           title="선택한 작업을 완료 처리하고, 에이전트를 골랐다면 함께 할당합니다">완료 처리</button>
         <button type="button" class="fsx-bulk-btn" data-action="bulk-open" ${selectedDisabled}
@@ -519,18 +597,34 @@
         ${state.bulkBusy ? '<span class="fsx-inline-spinner">처리중…</span>' : ''}
       </div>`;
 
-    const agentSelect = bar.querySelector('.fsx-bulk-agent');
-    if (agentSelect && prevAgentValue) agentSelect.value = prevAgentValue;
   }
 
-  function injectInlineControls() {
+  function scheduleInlineControls({ forceScan = false, delay = DOM_UPDATE_DEBOUNCE_MS } = {}) {
+    if (contextInvalidated) return;
+    forceRowScanPending = forceRowScanPending || forceScan;
+    if (renderTimerId || renderFrameId) return;
+    renderTimerId = window.setTimeout(() => {
+      renderTimerId = null;
+      if (renderFrameId) window.cancelAnimationFrame(renderFrameId);
+      renderFrameId = window.requestAnimationFrame(() => {
+        renderFrameId = null;
+        const shouldForceScan = forceRowScanPending;
+        forceRowScanPending = false;
+        injectInlineControls({ forceScan: shouldForceScan });
+      });
+    }, Math.max(0, delay));
+  }
+
+  function injectInlineControls({ forceScan = false } = {}) {
     syncThemeClass();
     if (!state.ticketId || !state.settings.configured || !state.tasks.length) {
       removeBulkBar();
+      resetTaskRowCache();
       return;
     }
 
-    const rows = findTaskRows();
+    ensureAgentDatalist();
+    const rows = findTaskRows({ force: forceScan });
     renderBulkBar(rows);
 
     rows.forEach(({ row, task }) => {
@@ -667,7 +761,12 @@
       return;
     }
     if (action === 'bulk-complete' || action === 'bulk-open') {
-      const agentId = Number(document.querySelector('.fsx-bulk-agent')?.value || 0);
+      const agentInput = document.querySelector('.fsx-bulk-agent');
+      const agentId = agentIdFromInput(agentInput);
+      if (agentInput?.value.trim() && !agentId) {
+        showToast('에이전트 검색 결과에서 정확한 항목을 선택해주세요.', 'warning');
+        return;
+      }
       const status = action === 'bulk-complete' ? TASK_STATUS.COMPLETED : TASK_STATUS.OPEN;
       const updates = { status };
       const baseLabel = action === 'bulk-complete' ? '완료 처리' : '대기 상태로 변경';
@@ -681,9 +780,9 @@
       return;
     }
     if (action === 'bulk-assign-unassigned') {
-      const agentId = Number(document.querySelector('.fsx-bulk-agent')?.value || 0);
+      const agentId = agentIdFromInput(document.querySelector('.fsx-bulk-agent'));
       if (!agentId) {
-        showToast('일괄 할당할 에이전트를 먼저 선택해주세요.', 'warning');
+        showToast('검색 결과에서 일괄 할당할 에이전트를 선택해주세요.', 'warning');
         return;
       }
       const agent = state.agents.find(item => Number(item.id) === agentId);
@@ -703,9 +802,16 @@
       return;
     }
 
-    const agentSelect = event.target.closest('.fsx-inline-agent');
-    if (agentSelect) {
-      updateTaskAgent(agentSelect.dataset.taskId, agentSelect.value);
+    const agentInput = event.target.closest('.fsx-inline-agent');
+    if (agentInput) {
+      const task = taskById(agentInput.dataset.taskId);
+      const agentId = agentIdFromInput(agentInput);
+      if (!agentId) {
+        agentInput.value = displayValueForAgentId(task?.agent_id);
+        showToast('에이전트 검색 결과에서 정확한 항목을 선택해주세요.', 'warning');
+        return;
+      }
+      if (Number(task?.agent_id) !== agentId) updateTaskAgent(agentInput.dataset.taskId, agentId);
     }
   }
 
@@ -792,31 +898,101 @@
     injectInlineControls();
   }
 
+  function clearInjectedControls() {
+    document.querySelectorAll('.fsx-inline-controls').forEach(controls => controls.remove());
+    document.querySelectorAll('.fsx-inline-row').forEach(row => {
+      row.classList.remove('fsx-inline-row', 'fsx-inline-selected', 'fsx-inline-completed');
+      delete row.dataset.fsxTaskId;
+    });
+    removeBulkBar();
+    resetTaskRowCache();
+  }
+
+  function handlePossibleNavigation() {
+    const nextUrl = location.href;
+    const nextTicketId = extractTicketId();
+    if (nextUrl === lastUrl && nextTicketId === state.ticketId) return false;
+
+    lastUrl = nextUrl;
+    if (nextTicketId === state.ticketId) {
+      if (nextTicketId) scheduleInlineControls({ forceScan: true });
+      return true;
+    }
+
+    state.ticketId = nextTicketId;
+    state.loadedTicketId = null;
+    state.tasks = [];
+    state.agents = [];
+    state.currentAgentId = null;
+    rebuildAgentLookup();
+    clearSelection();
+    clearInjectedControls();
+    if (nextTicketId) loadContext({ force: true });
+    return true;
+  }
+
+  function elementForNode(node) {
+    if (!node) return null;
+    return node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  }
+
+  function isInsideExtensionUi(node) {
+    return !!elementForNode(node)?.closest?.(EXTENSION_ROOT_SELECTOR);
+  }
+
+  function isExtensionRootNode(node) {
+    const element = elementForNode(node);
+    return !!element?.matches?.(EXTENSION_ROOT_SELECTOR);
+  }
+
+  function nodeContainsTaskHint(node) {
+    if (!node || isInsideExtensionUi(node)) return false;
+    if (node.nodeType === Node.TEXT_NODE) return /#?TSK-\d+/i.test(node.nodeValue || '');
+    return /#?TSK-\d+/i.test(node.textContent || '');
+  }
+
+  function handlePageMutations(records) {
+    if (contextInvalidated || handlePossibleNavigation()) return;
+    if (!state.ticketId || !state.tasks.length) return;
+
+    let forceScan = false;
+    let repairControls = false;
+
+    records.forEach(record => {
+      if (isInsideExtensionUi(record.target)) return;
+
+      const added = Array.from(record.addedNodes || []);
+      const removed = Array.from(record.removedNodes || []);
+      if (added.length && !removed.length && added.every(isExtensionRootNode)) return;
+
+      if (record.type === 'characterData' && nodeContainsTaskHint(record.target)) forceScan = true;
+      if (added.some(nodeContainsTaskHint) || removed.some(nodeContainsTaskHint)) forceScan = true;
+      if (removed.some(isExtensionRootNode)) repairControls = true;
+      if (elementForNode(record.target)?.closest?.('.fsx-inline-row')) repairControls = true;
+    });
+
+    if (!forceScan) {
+      for (const row of taskRowCache.values()) {
+        if (!row.isConnected) {
+          forceScan = true;
+          break;
+        }
+        if (!row.querySelector(':scope > .fsx-inline-controls')) repairControls = true;
+      }
+    }
+
+    if (forceScan || repairControls) scheduleInlineControls({ forceScan });
+  }
+
   function watchPage() {
-    let lastUrl = location.href;
     watchIntervalId = setInterval(() => {
       if (contextInvalidated) return;
       syncThemeClass();
-      const nextTicketId = extractTicketId();
-      if (location.href !== lastUrl || nextTicketId !== state.ticketId) {
-        lastUrl = location.href;
-        state.ticketId = nextTicketId;
-        state.loadedTicketId = null;
-        state.tasks = [];
-        state.agents = [];
-        clearSelection();
-        loadContext({ force: true });
-      } else {
-        injectInlineControls();
-      }
-    }, 1200);
+      handlePossibleNavigation();
+    }, URL_CHECK_INTERVAL_MS);
 
-    pageObserver = new MutationObserver(() => {
-      if (contextInvalidated) return;
-      syncThemeClass();
-      injectInlineControls();
-    });
-    pageObserver.observe(document.documentElement, { childList: true, subtree: true });
+    pageObserver = new MutationObserver(handlePageMutations);
+    pageObserver.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   }
 
   document.addEventListener('change', handleChange, true);
@@ -831,8 +1007,14 @@
     state.loadedTicketId = null;
     state.tasks = [];
     state.agents = [];
+    state.currentAgentId = null;
+    rebuildAgentLookup();
     clearSelection();
+    clearInjectedControls();
     loadContext({ force: true });
+  });
+  window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+    syncThemeClass({ force: true });
   });
   loadContext({ force: true });
   watchPage();

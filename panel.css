@@ -105,7 +105,9 @@
   background: #fff;
   border: 1px solid #ccd5df;
   border-radius: 6px;
+  box-sizing: border-box;
   color: #17212b;
+  cursor: text;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
   font-size: 13px;
   font-weight: 800;
@@ -114,6 +116,7 @@
   min-width: 224px;
   outline: none;
   padding: 0 28px 0 10px;
+  text-overflow: ellipsis;
 }
 
 .fsx-inline-agent:focus {
@@ -379,7 +382,9 @@
   background: #fff;
   border: 1px solid #ccd5df;
   border-radius: 6px;
+  box-sizing: border-box;
   color: #17212b;
+  cursor: text;
   font-family: inherit;
   font-size: 13px;
   font-weight: 800;
@@ -388,6 +393,7 @@
   min-width: 180px;
   outline: none;
   padding: 0 28px 0 10px;
+  text-overflow: ellipsis;
 }
 
 .fsx-bulk-agent:focus {
